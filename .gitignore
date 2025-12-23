@@ -1,0 +1,5 @@
+blood_on_the_clocktower_K_docs_temp_scripts/  
+__pycache__/  
+*.pyc  
+.env  
+venv/ 
