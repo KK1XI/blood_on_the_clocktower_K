@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>血染钟楼 - 说书人系统</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🩸</span>
+                    <h1>血染钟楼</h1>
+                    <span class="subtitle">说书人系统</span>
+                </div>
+                <div class="game-info" id="gameInfo" style="display: none;">
+                    <span class="script-name" id="currentScript"></span>
+                    <span class="phase-indicator" id="phaseIndicator"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区域 -->
+        <main class="main-content">
+            <!-- 设置面板 -->
+            <section id="setupPanel" class="panel setup-panel">
+                <div class="panel-header">
+                    <h2>游戏设置</h2>
+                </div>
+                <div class="panel-body">
+                    <!-- 剧本选择 -->
+                    <div class="setup-section">
+                        <h3>选择剧本</h3>
+                        <div class="script-grid" id="scriptGrid">
+                            <!-- 剧本卡片将由JavaScript生成 -->
+                        </div>
+                    </div>
+
+                    <!-- 玩家数量 -->
+                    <div class="setup-section">
+                        <h3>参与人数</h3>
+                        <div class="player-count-wrapper">
+                            <input type="range" id="playerCount" min="5" max="15" value="8" class="player-slider">
+                            <div class="player-count-display">
+                                <span id="playerCountValue">8</span> 名玩家
+                            </div>
+                        </div>
+                        <div class="role-distribution" id="roleDistribution">
+                            <!-- 角色分布将由JavaScript生成 -->
+                        </div>
+                    </div>
+
+                    <!-- 玩家信息输入 -->
+                    <div class="setup-section">
+                        <h3>玩家信息</h3>
+                        <div class="player-input-grid" id="playerInputGrid">
+                            <!-- 玩家输入框将由JavaScript生成 -->
+                        </div>
+                    </div>
+
+                    <!-- 角色分配方式 -->
+                    <div class="setup-section">
+                        <h3>角色分配</h3>
+                        <div class="assignment-options">
+                            <button class="btn btn-primary" id="randomAssignBtn">
+                                <span class="btn-icon">🎲</span>
+                                随机分配
+                            </button>
+                            <button class="btn btn-secondary" id="manualAssignBtn">
+                                <span class="btn-icon">✋</span>
+                                手动分配
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 手动分配弹窗 -->
+            <div class="modal" id="manualAssignModal">
+                <div class="modal-content modal-large">
+                    <div class="modal-header">
+                        <h3>手动分配角色</h3>
+                        <button class="modal-close" onclick="closeModal('manualAssignModal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="manual-assign-grid" id="manualAssignGrid">
+                            <!-- 手动分配表格将由JavaScript生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="closeModal('manualAssignModal')">取消</button>
+                        <button class="btn btn-primary" id="confirmManualAssign">确认分配</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 游戏面板 -->
+            <section id="gamePanel" class="panel game-panel" style="display: none;">
+                <div class="game-layout">
+                    <!-- 玩家圆桌 -->
+                    <div class="table-section">
+                        <div class="table-container">
+                            <div class="player-circle" id="playerCircle">
+                                <!-- 玩家座位将由JavaScript生成 -->
+                            </div>
+                            <div class="table-center">
+                                <div class="day-night-indicator" id="dayNightIndicator">
+                                    <span class="indicator-icon">☀️</span>
+                                    <span class="indicator-text">第 1 天</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 控制面板 -->
+                    <div class="control-section">
+                        <!-- 阶段控制 -->
+                        <div class="control-card">
+                            <h3>阶段控制</h3>
+                            <div class="phase-controls">
+                                <button class="btn btn-night" id="startNightBtn">
+                                    <span>🌙</span> 开始夜晚
+                                </button>
+                                <button class="btn btn-day" id="startDayBtn" disabled>
+                                    <span>☀️</span> 开始白天
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 夜间行动面板 -->
+                        <div class="control-card" id="nightPanel" style="display: none;">
+                            <h3>夜间行动顺序</h3>
+                            <div class="night-order-list" id="nightOrderList">
+                                <!-- 夜间行动顺序将由JavaScript生成 -->
+                            </div>
+                        </div>
+
+                        <!-- 提名投票面板 -->
+                        <div class="control-card" id="nominationPanel" style="display: none;">
+                            <h3>提名与投票</h3>
+                            <div class="nomination-section">
+                                <div class="nomination-form">
+                                    <select id="nominatorSelect" class="form-select">
+                                        <option value="">选择提名者</option>
+                                    </select>
+                                    <span class="nomination-arrow">➜</span>
+                                    <select id="nomineeSelect" class="form-select">
+                                        <option value="">选择被提名者</option>
+                                    </select>
+                                    <button class="btn btn-primary" id="nominateBtn">提名</button>
+                                </div>
+                                <div class="nominations-list" id="nominationsList">
+                                    <!-- 提名列表将由JavaScript生成 -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 游戏日志 -->
+                        <div class="control-card log-card">
+                            <h3>游戏日志</h3>
+                            <div class="game-log" id="gameLog">
+                                <!-- 日志将由JavaScript生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 玩家详情弹窗 -->
+            <div class="modal" id="playerDetailModal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3 id="playerDetailName">玩家详情</h3>
+                        <button class="modal-close" onclick="closeModal('playerDetailModal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="player-detail-content" id="playerDetailContent">
+                            <!-- 玩家详情将由JavaScript生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="closeModal('playerDetailModal')">关闭</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 投票弹窗 -->
+            <div class="modal" id="voteModal">
+                <div class="modal-content modal-large">
+                    <div class="modal-header">
+                        <h3 id="voteModalTitle">投票</h3>
+                        <button class="modal-close" onclick="closeModal('voteModal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="vote-info" id="voteInfo">
+                            <!-- 投票信息将由JavaScript生成 -->
+                        </div>
+                        <div class="vote-grid" id="voteGrid">
+                            <!-- 投票按钮将由JavaScript生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <div class="vote-count" id="voteCount">
+                            <span>赞成票: <strong id="yesVotes">0</strong></span>
+                            <span>需要票数: <strong id="requiredVotes">0</strong></span>
+                        </div>
+                        <button class="btn btn-danger" id="executeBtn">执行处决</button>
+                        <button class="btn btn-secondary" onclick="closeModal('voteModal')">关闭</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 信息生成弹窗 -->
+            <div class="modal" id="infoModal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>角色信息</h3>
+                        <button class="modal-close" onclick="closeModal('infoModal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="info-content" id="infoContent">
+                            <!-- 信息内容将由JavaScript生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="closeModal('infoModal')">关闭</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 游戏结束弹窗 -->
+            <div class="modal" id="gameEndModal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>游戏结束</h3>
+                    </div>
+                    <div class="modal-body">
+                        <div class="game-end-content" id="gameEndContent">
+                            <!-- 游戏结束内容将由JavaScript生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" onclick="location.reload()">开始新游戏</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <p>Blood on the Clocktower 说书人辅助工具</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+

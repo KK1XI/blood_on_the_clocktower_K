@@ -1,0 +1,1678 @@
+// 血染钟楼说书人系统 - 前端JavaScript
+
+// ===== 全局状态 =====
+let gameState = {
+    gameId: null,
+    scriptId: null,
+    playerCount: 8,
+    players: [],
+    currentPhase: 'setup',
+    dayNumber: 0,
+    nightNumber: 0,
+    nominations: [],
+    nightOrder: [],
+    currentNightIndex: 0
+};
+
+let scripts = [];
+let roleDistribution = {};
+
+// ===== 初始化 =====
+document.addEventListener('DOMContentLoaded', () => {
+    initializeApp();
+});
+
+async function initializeApp() {
+    await loadScripts();
+    setupEventListeners();
+    updatePlayerInputs();
+    updateRoleDistribution();
+}
+
+// ===== API 调用 =====
+async function apiCall(endpoint, method = 'GET', data = null) {
+    const options = {
+        method,
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    };
+    
+    if (data) {
+        options.body = JSON.stringify(data);
+    }
+    
+    const response = await fetch(endpoint, options);
+    return response.json();
+}
+
+// ===== 加载剧本 =====
+async function loadScripts() {
+    scripts = await apiCall('/api/scripts');
+    renderScriptGrid();
+}
+
+function renderScriptGrid() {
+    const grid = document.getElementById('scriptGrid');
+    grid.innerHTML = scripts.map(script => `
+        <div class="script-card" data-script-id="${script.id}" onclick="selectScript('${script.id}')">
+            <div class="script-name-zh">${script.name}</div>
+            <div class="script-name-en">${script.name_en}</div>
+            <div class="script-desc">${script.description}</div>
+        </div>
+    `).join('');
+    
+    // 默认选中第一个
+    if (scripts.length > 0) {
+        selectScript(scripts[0].id);
+    }
+}
+
+function selectScript(scriptId) {
+    gameState.scriptId = scriptId;
+    
+    // 更新UI
+    document.querySelectorAll('.script-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    document.querySelector(`[data-script-id="${scriptId}"]`).classList.add('selected');
+}
+
+// ===== 玩家数量 =====
+function setupEventListeners() {
+    // 玩家数量滑块
+    const playerSlider = document.getElementById('playerCount');
+    playerSlider.addEventListener('input', (e) => {
+        gameState.playerCount = parseInt(e.target.value);
+        document.getElementById('playerCountValue').textContent = gameState.playerCount;
+        updatePlayerInputs();
+        updateRoleDistribution();
+    });
+    
+    // 随机分配按钮
+    document.getElementById('randomAssignBtn').addEventListener('click', handleRandomAssign);
+    
+    // 手动分配按钮
+    document.getElementById('manualAssignBtn').addEventListener('click', openManualAssignModal);
+    
+    // 确认手动分配
+    document.getElementById('confirmManualAssign').addEventListener('click', handleManualAssign);
+    
+    // 开始夜晚
+    document.getElementById('startNightBtn').addEventListener('click', startNight);
+    
+    // 开始白天
+    document.getElementById('startDayBtn').addEventListener('click', startDay);
+    
+    // 提名
+    document.getElementById('nominateBtn').addEventListener('click', handleNominate);
+    
+    // 处决
+    document.getElementById('executeBtn').addEventListener('click', handleExecute);
+}
+
+function updatePlayerInputs() {
+    const grid = document.getElementById('playerInputGrid');
+    grid.innerHTML = '';
+    
+    for (let i = 1; i <= gameState.playerCount; i++) {
+        const existingName = gameState.players[i - 1]?.name || '';
+        grid.innerHTML += `
+            <div class="player-input-item">
+                <label>座位 ${i}</label>
+                <input type="text" id="playerName${i}" placeholder="玩家${i}" value="${existingName}">
+            </div>
+        `;
+    }
+}
+
+async function updateRoleDistribution() {
+    const dist = await apiCall(`/api/role_distribution/${gameState.playerCount}`);
+    roleDistribution = dist;
+    
+    const container = document.getElementById('roleDistribution');
+    container.innerHTML = `
+        <div class="role-dist-item townsfolk">
+            <div class="role-dist-count">${dist.townsfolk}</div>
+            <div class="role-dist-label">镇民</div>
+        </div>
+        <div class="role-dist-item outsider">
+            <div class="role-dist-count">${dist.outsider}</div>
+            <div class="role-dist-label">外来者</div>
+        </div>
+        <div class="role-dist-item minion">
+            <div class="role-dist-count">${dist.minion}</div>
+            <div class="role-dist-label">爪牙</div>
+        </div>
+        <div class="role-dist-item demon">
+            <div class="role-dist-count">${dist.demon}</div>
+            <div class="role-dist-label">恶魔</div>
+        </div>
+    `;
+}
+
+// ===== 角色分配 =====
+function getPlayerNames() {
+    const names = [];
+    for (let i = 1; i <= gameState.playerCount; i++) {
+        const input = document.getElementById(`playerName${i}`);
+        names.push(input.value.trim() || `玩家${i}`);
+    }
+    return names;
+}
+
+async function handleRandomAssign() {
+    if (!gameState.scriptId) {
+        alert('请先选择剧本');
+        return;
+    }
+    
+    const playerNames = getPlayerNames();
+    
+    // 创建游戏
+    const createResult = await apiCall('/api/game/create', 'POST', {
+        script_id: gameState.scriptId,
+        player_count: gameState.playerCount
+    });
+    
+    if (!createResult.success) {
+        alert(createResult.error || '创建游戏失败');
+        return;
+    }
+    
+    gameState.gameId = createResult.game_id;
+    
+    // 随机分配角色
+    const assignResult = await apiCall(`/api/game/${gameState.gameId}/assign_random`, 'POST', {
+        player_names: playerNames
+    });
+    
+    if (!assignResult.success) {
+        alert(assignResult.error || '分配角色失败');
+        return;
+    }
+    
+    gameState.players = assignResult.players;
+    startGame();
+}
+
+async function openManualAssignModal() {
+    if (!gameState.scriptId) {
+        alert('请先选择剧本');
+        return;
+    }
+    
+    const playerNames = getPlayerNames();
+    
+    // 创建游戏获取角色列表
+    const createResult = await apiCall('/api/game/create', 'POST', {
+        script_id: gameState.scriptId,
+        player_count: gameState.playerCount
+    });
+    
+    if (!createResult.success) {
+        alert(createResult.error || '创建游戏失败');
+        return;
+    }
+    
+    gameState.gameId = createResult.game_id;
+    
+    // 获取可用角色
+    const roles = await apiCall(`/api/game/${gameState.gameId}/roles`);
+    
+    // 生成手动分配表格
+    const grid = document.getElementById('manualAssignGrid');
+    grid.innerHTML = playerNames.map((name, index) => `
+        <div class="manual-assign-row">
+            <div class="assign-seat-num">${index + 1}</div>
+            <div class="assign-player-name">${name}</div>
+            <select class="role-select" id="roleSelect${index}">
+                <option value="">-- 选择角色 --</option>
+                <optgroup label="镇民">
+                    ${roles.townsfolk.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}
+                </optgroup>
+                <optgroup label="外来者">
+                    ${roles.outsider.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}
+                </optgroup>
+                <optgroup label="爪牙">
+                    ${roles.minion.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}
+                </optgroup>
+                <optgroup label="恶魔">
+                    ${roles.demon.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}
+                </optgroup>
+            </select>
+        </div>
+    `).join('');
+    
+    showModal('manualAssignModal');
+}
+
+async function handleManualAssign() {
+    const playerNames = getPlayerNames();
+    const assignments = [];
+    
+    for (let i = 0; i < gameState.playerCount; i++) {
+        const roleSelect = document.getElementById(`roleSelect${i}`);
+        assignments.push({
+            name: playerNames[i],
+            role_id: roleSelect.value || null
+        });
+    }
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/assign_manual`, 'POST', {
+        assignments
+    });
+    
+    if (!result.success) {
+        alert(result.error || '分配角色失败');
+        return;
+    }
+    
+    gameState.players = result.players;
+    closeModal('manualAssignModal');
+    startGame();
+}
+
+// ===== 游戏开始 =====
+function startGame() {
+    // 隐藏设置面板，显示游戏面板
+    document.getElementById('setupPanel').style.display = 'none';
+    document.getElementById('gamePanel').style.display = 'block';
+    document.getElementById('gameInfo').style.display = 'flex';
+    
+    // 更新游戏信息
+    const script = scripts.find(s => s.id === gameState.scriptId);
+    document.getElementById('currentScript').textContent = script.name;
+    updatePhaseIndicator('setup');
+    
+    // 渲染玩家座位
+    renderPlayerCircle();
+    
+    // 更新选择框
+    updatePlayerSelects();
+    
+    // 添加日志
+    addLogEntry('游戏开始', 'phase');
+}
+
+function renderPlayerCircle() {
+    const circle = document.getElementById('playerCircle');
+    circle.innerHTML = '';
+    
+    const centerX = 300;
+    const centerY = 300;
+    const radius = 240;
+    
+    gameState.players.forEach((player, index) => {
+        const angle = (index / gameState.players.length) * 2 * Math.PI - Math.PI / 2;
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+        
+        const roleClass = player.role_type || '';
+        const statusClasses = [];
+        if (!player.alive) statusClasses.push('dead');
+        if (player.poisoned) statusClasses.push('poisoned');
+        if (player.drunk && !player.is_the_drunk) statusClasses.push('drunk'); // 酒鬼不显示普通醉酒样式
+        if (player.protected) statusClasses.push('protected');
+        if (player.ability_used) statusClasses.push('ability-used');
+        if (player.is_the_drunk) statusClasses.push('is-the-drunk'); // 酒鬼特殊样式
+        
+        // 生成右下角状态图标HTML
+        let statusIcons = '';
+        if (player.poisoned) statusIcons += '<span class="status-icon poison-icon" title="中毒">🧪</span>';
+        if (player.drunk && !player.is_the_drunk) statusIcons += '<span class="status-icon drunk-icon" title="醉酒">🍺</span>';
+        if (player.protected) statusIcons += '<span class="status-icon protect-icon" title="被保护">🛡️</span>';
+        if (player.ability_used) statusIcons += '<span class="status-icon used-icon" title="技能已用">✗</span>';
+        if (player.is_grandchild) statusIcons += '<span class="status-icon grandchild-icon" title="祖母的孙子">👶</span>';
+        if (player.is_butler_master) statusIcons += '<span class="status-icon master-icon" title="管家的主人">👑</span>';
+        
+        // 生成左下角标记HTML（酒鬼标记）
+        let leftIcons = '';
+        if (player.is_the_drunk) leftIcons += '<span class="left-icon drunk-role-icon" title="是酒鬼">🍺</span>';
+        if (player.butler_master_id) leftIcons += '<span class="left-icon butler-icon" title="是管家">🎩</span>';
+        
+        circle.innerHTML += `
+            <div class="player-seat ${statusClasses.join(' ')}" 
+                 style="left: ${x}px; top: ${y}px;"
+                 data-player-id="${player.id}"
+                 onclick="openPlayerDetail(${player.id})">
+                <div class="seat-content">
+                    <span class="seat-number">${player.id}</span>
+                    <span class="seat-name">${player.name}</span>
+                    <span class="seat-role ${roleClass}">${player.role?.name || '未分配'}</span>
+                    ${leftIcons ? `<div class="left-icons">${leftIcons}</div>` : ''}
+                    ${statusIcons ? `<div class="status-icons">${statusIcons}</div>` : ''}
+                </div>
+            </div>
+        `;
+    });
+}
+
+function updatePlayerSelects() {
+    const nominatorSelect = document.getElementById('nominatorSelect');
+    const nomineeSelect = document.getElementById('nomineeSelect');
+    
+    const alivePlayers = gameState.players.filter(p => p.alive);
+    const allPlayers = gameState.players;
+    
+    nominatorSelect.innerHTML = '<option value="">选择提名者</option>' +
+        alivePlayers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    
+    nomineeSelect.innerHTML = '<option value="">选择被提名者</option>' +
+        allPlayers.map(p => `<option value="${p.id}">${p.name}${p.alive ? '' : ' (已死亡)'}</option>`).join('');
+}
+
+// ===== 阶段控制 =====
+async function startNight() {
+    const result = await apiCall(`/api/game/${gameState.gameId}/start_night`, 'POST');
+    
+    if (!result.success) {
+        alert(result.error || '开始夜晚失败');
+        return;
+    }
+    
+    gameState.currentPhase = 'night';
+    gameState.nightNumber = result.night_number;
+    gameState.nightOrder = result.night_order;
+    gameState.currentNightIndex = 0;
+    gameState.alivePlayers = result.alive_players || [];
+    
+    // 重置所有玩家的保护状态
+    gameState.players.forEach(p => {
+        p.protected = false;
+    });
+    
+    updatePhaseIndicator('night');
+    updateDayNightIndicator();
+    renderPlayerCircle(); // 刷新显示
+    
+    // 显示夜间面板，隐藏提名面板
+    document.getElementById('nightPanel').style.display = 'block';
+    document.getElementById('nominationPanel').style.display = 'none';
+    
+    // 渲染夜间顺序
+    renderNightOrder();
+    
+    // 更新按钮状态
+    document.getElementById('startNightBtn').disabled = true;
+    document.getElementById('startDayBtn').disabled = false;
+    
+    addLogEntry(`第 ${gameState.nightNumber} 个夜晚开始`, 'phase');
+}
+
+function renderNightOrder() {
+    const list = document.getElementById('nightOrderList');
+    
+    if (gameState.nightOrder.length === 0) {
+        list.innerHTML = '<p style="color: var(--text-muted); text-align: center;">今晚没有角色需要行动</p>';
+        return;
+    }
+    
+    list.innerHTML = gameState.nightOrder.map((item, index) => `
+        <div class="night-order-item ${index < gameState.currentNightIndex ? 'completed' : ''}"
+             data-index="${index}"
+             onclick="handleNightAction(${index})">
+            <div class="night-order-number">${index + 1}</div>
+            <div class="night-order-info">
+                <div class="night-order-name">${item.player_name}</div>
+                <div class="night-order-role">${item.role_name}: ${item.ability.substring(0, 50)}...</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 当前夜间行动的全局变量
+let currentNightActionIndex = null;
+let currentNightActionTarget = null;
+let currentNightActionSecondTarget = null;
+
+async function handleNightAction(index) {
+    const item = gameState.nightOrder[index];
+    currentNightActionIndex = index;
+    currentNightActionTarget = null;
+    currentNightActionSecondTarget = null;
+    
+    // 获取存活玩家列表
+    const alivePlayers = gameState.players.filter(p => p.alive);
+    const allPlayers = gameState.players;
+    
+    // 根据角色类型显示不同的UI
+    const infoContent = document.getElementById('infoContent');
+    let actionUI = '';
+    
+    // 基本信息
+    const headerHTML = `
+        <h4 style="margin-bottom: var(--spacing-md); color: var(--color-gold);">${item.player_name} - ${item.role_name}</h4>
+        <p style="margin-bottom: var(--spacing-lg); color: var(--text-secondary);">${item.ability}</p>
+    `;
+    
+    // 根据行动类型生成不同UI
+    if (item.action_type === 'kill') {
+        // 恶魔/爪牙击杀 - 可选择目标或不选择
+        const roleLabel = item.role_type === 'demon' ? '恶魔' : '爪牙';
+        
+        // 对于珀(Po)等特殊恶魔，可能可以选择多个目标
+        const isMultiKill = item.role_id === 'po' || item.role_id === 'shabaloth';
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-minion); margin-bottom: var(--spacing-md);">🗡️ ${roleLabel}击杀</h5>
+                <div class="target-select-group">
+                    <label>选择击杀目标:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 不击杀任何人 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ${isMultiKill ? `
+                <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                    <label>选择第二个目标 (可选):</label>
+                    <select id="nightActionSecondTarget" class="form-select" onchange="updateNightActionSecondTarget(this.value)">
+                        <option value="">-- 无 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ` : ''}
+                <div id="protectionWarning" style="display: none; margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(39, 174, 96, 0.2); border-radius: var(--radius-sm); color: var(--color-alive);">
+                    ⚠️ 该目标可能被保护
+                </div>
+            </div>
+        `;
+    } else if (item.action_type === 'protect') {
+        // 保护类角色 - 僧侣、旅店老板等
+        const isInnkeeper = item.role_id === 'innkeeper';
+        
+        if (isInnkeeper) {
+            // 旅店老板 - 选择两名玩家，其中一人会醉酒
+            actionUI = `
+                <div class="night-action-panel">
+                    <h5 style="color: var(--color-alive); margin-bottom: var(--spacing-md);">🛡️ 旅店老板 - 保护</h5>
+                    <div class="target-select-group">
+                        <label>选择第一个保护目标:</label>
+                        <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                            <option value="">-- 选择第一个玩家 --</option>
+                            ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                                `<option value="${p.id}">${p.name}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                        <label>选择第二个保护目标:</label>
+                        <select id="nightActionSecondTarget" class="form-select" onchange="updateNightActionSecondTarget(this.value)">
+                            <option value="">-- 选择第二个玩家 --</option>
+                            ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                                `<option value="${p.id}">${p.name}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                        <label>选择哪位玩家会醉酒:</label>
+                        <select id="drunkTarget" class="form-select">
+                            <option value="first">第一个目标醉酒</option>
+                            <option value="second">第二个目标醉酒</option>
+                        </select>
+                    </div>
+                    <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                        两名玩家今晚无法死亡，但其中一人会喝醉到明天黄昏
+                    </p>
+                </div>
+            `;
+        } else {
+            // 僧侣等 - 只选择一名玩家
+            actionUI = `
+                <div class="night-action-panel">
+                    <h5 style="color: var(--color-alive); margin-bottom: var(--spacing-md);">🛡️ 保护</h5>
+                    <div class="target-select-group">
+                        <label>选择保护目标:</label>
+                        <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                            <option value="">-- 选择要保护的玩家 --</option>
+                            ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                                `<option value="${p.id}">${p.name}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                        被保护的玩家今晚不会被恶魔杀死
+                    </p>
+                </div>
+            `;
+        }
+    } else if (item.action_type === 'poison') {
+        // 投毒类角色
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-poisoned); margin-bottom: var(--spacing-md);">🧪 投毒</h5>
+                <div class="target-select-group">
+                    <label>选择投毒目标:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 选择目标 --</option>
+                        ${alivePlayers.map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    被投毒的玩家能力失效到明天白天
+                </p>
+            </div>
+        `;
+    } else if (item.action_type === 'pukka_poison') {
+        // 普卡 - 特殊投毒恶魔
+        const actionPlayer = gameState.players.find(p => p.id === item.player_id);
+        const previousTargetId = actionPlayer?.pukka_previous_target;
+        const previousTarget = previousTargetId ? gameState.players.find(p => p.id === previousTargetId) : null;
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-demon); margin-bottom: var(--spacing-md);">普卡 - 投毒恶魔</h5>
+                ${previousTarget && previousTarget.alive ? `
+                <div style="padding: var(--spacing-md); background: rgba(139, 0, 0, 0.3); border: 1px solid var(--color-blood); border-radius: var(--radius-md); margin-bottom: var(--spacing-md);">
+                    <p style="color: var(--color-blood);">💀 前一晚的目标 <strong>${previousTarget.name}</strong> 将在今晚死亡（除非被保护）</p>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: var(--spacing-xs);">该玩家的中毒状态将解除（恢复健康）</p>
+                </div>
+                ` : previousTarget && !previousTarget.alive ? `
+                <div style="padding: var(--spacing-sm); background: rgba(100, 100, 100, 0.2); border-radius: var(--radius-md); margin-bottom: var(--spacing-md);">
+                    <p style="color: var(--text-muted);">前一晚的目标 ${previousTarget.name} 已死亡</p>
+                </div>
+                ` : gameState.nightNumber > 1 ? `
+                <div style="padding: var(--spacing-sm); background: rgba(100, 100, 100, 0.2); border-radius: var(--radius-md); margin-bottom: var(--spacing-md);">
+                    <p style="color: var(--text-muted);">没有前一晚的目标需要处理</p>
+                </div>
+                ` : ''}
+                <div class="target-select-group">
+                    <label>选择今晚的投毒目标:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 选择目标 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}${p.id === previousTargetId ? ' (前一晚目标)' : ''}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    普卡每晚选择一名玩家使其中毒。<br>
+                    被选中的前一个玩家会在今晚死亡，然后中毒状态解除。
+                </p>
+            </div>
+        `;
+    } else if (item.action_type === 'drunk') {
+        // 醉酒类角色（如侍臣）- 一次性技能
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-drunk); margin-bottom: var(--spacing-md);">🍺 使目标醉酒</h5>
+                <div class="target-select-group">
+                    <label>选择要使其醉酒的角色:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 选择目标 --</option>
+                        ${alivePlayers.map(p => 
+                            `<option value="${p.id}">${p.name} (${p.role?.name || '未知'})</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                    <label>醉酒持续时间:</label>
+                    <select id="drunkDuration" class="form-select">
+                        <option value="3" selected>3 天 3 夜（侍臣默认）</option>
+                        <option value="1">1 天 1 夜</option>
+                        <option value="2">2 天 2 夜</option>
+                        <option value="999">直到游戏结束</option>
+                    </select>
+                </div>
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    ⚠️ 这是一次性技能，使用后将不再出现在夜间行动列表中
+                </p>
+            </div>
+        `;
+    } else if (item.action_type === 'sailor_drunk') {
+        // 水手 - 选择目标，然后决定谁醉酒
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-townsfolk); margin-bottom: var(--spacing-md);">⚓ 水手能力</h5>
+                <div class="target-select-group">
+                    <label>选择一名玩家:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value); updateSailorDrunkPreview();">
+                        <option value="">-- 选择目标 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name} (${p.role?.name || '未知'})</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div id="sailorDrunkChoice" style="margin-top: var(--spacing-md); display: none;">
+                    <label>选择谁喝醉（水手与目标之一）:</label>
+                    <select id="sailorDrunkTarget" class="form-select" onchange="updateSailorDrunkChoice(this.value);">
+                        <option value="target">目标玩家喝醉</option>
+                        <option value="sailor">水手自己喝醉</option>
+                    </select>
+                </div>
+                <div id="sailorDrunkPreview" style="margin-top: var(--spacing-md); padding: var(--spacing-md); background: rgba(0,0,0,0.3); border-radius: var(--radius-md); display: none;">
+                    <p style="color: var(--color-drunk);">🍺 <span id="sailorDrunkName"></span> 将喝醉到明天黄昏</p>
+                </div>
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    水手选择一名玩家后，说书人决定水手和目标中谁喝醉。<br>
+                    水手在喝醉时无法死亡。
+                </p>
+            </div>
+        `;
+    } else if (item.action_type === 'info_select') {
+        // 选择目标获取信息类
+        const needsTwoTargets = ['fortune_teller', 'seamstress', 'chambermaid'].includes(item.role_id);
+        const needsOneTarget = ['ravenkeeper', 'dreamer'].includes(item.role_id);
+        const noTargetNeeded = ['empath', 'undertaker', 'oracle', 'flowergirl'].includes(item.role_id);
+        
+        // 检查该玩家是否处于醉酒/中毒状态
+        const actionPlayer = gameState.players.find(p => p.id === item.player_id);
+        const isDrunkOrPoisoned = actionPlayer && (actionPlayer.drunk || actionPlayer.poisoned);
+        
+        // 不需要目标的角色，直接生成信息
+        if (noTargetNeeded) {
+            const infoResult = await apiCall(`/api/game/${gameState.gameId}/generate_info`, 'POST', {
+                player_id: item.player_id,
+                targets: []
+            });
+            
+            actionUI = `
+                <div class="night-action-panel">
+                    <h5 style="color: var(--color-townsfolk); margin-bottom: var(--spacing-md);">🔮 获取信息</h5>
+                    ${isDrunkOrPoisoned ? `
+                    <div style="padding: var(--spacing-sm); background: rgba(243, 156, 18, 0.2); border: 1px solid var(--color-drunk); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                        <span style="color: var(--color-drunk);">⚠️ 该玩家处于${actionPlayer.drunk ? '醉酒' : '中毒'}状态，信息可能不准确</span>
+                    </div>
+                    ` : ''}
+                    <div class="info-message" style="padding: var(--spacing-md); background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(0, 0, 0, 0.3)); border-radius: var(--radius-lg); border: 1px solid var(--color-blood);">
+                        <p style="color: var(--color-gold); font-weight: 500;">${infoResult.message || '请根据角色能力提供相应信息'}</p>
+                        ${infoResult.is_drunk_or_poisoned ? '<p style="color: var(--color-drunk); font-size: 0.85rem; margin-top: var(--spacing-sm);">（玩家处于异常状态，可酌情提供错误信息）</p>' : ''}
+                    </div>
+                    <div style="margin-top: var(--spacing-md);">
+                        <label style="font-size: 0.85rem; color: var(--text-muted);">自定义/修改信息 (可选):</label>
+                        <textarea id="infoResultText" class="form-textarea" placeholder="如需修改自动生成的信息，在此输入..." style="width: 100%; margin-top: var(--spacing-sm); min-height: 60px; background: var(--bg-card-hover); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-sm); color: var(--text-primary); padding: var(--spacing-sm);"></textarea>
+                    </div>
+                </div>
+            `;
+        } else {
+            // 需要选择目标的角色
+            actionUI = `
+                <div class="night-action-panel">
+                    <h5 style="color: var(--color-townsfolk); margin-bottom: var(--spacing-md);">🔮 获取信息</h5>
+                    ${isDrunkOrPoisoned ? `
+                    <div style="padding: var(--spacing-sm); background: rgba(243, 156, 18, 0.2); border: 1px solid var(--color-drunk); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                        <span style="color: var(--color-drunk);">⚠️ 该玩家处于${actionPlayer.drunk ? '醉酒' : '中毒'}状态，信息可能不准确</span>
+                    </div>
+                    ` : ''}
+                    <div class="target-select-group">
+                        <label>选择目标玩家:</label>
+                        <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value); generateInfoForTarget();">
+                            <option value="">-- 选择目标 --</option>
+                            ${allPlayers.filter(p => p.id !== item.player_id).map(p => 
+                                `<option value="${p.id}">${p.name}${p.alive ? '' : ' (死亡)'}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    ${needsTwoTargets ? `
+                    <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                        <label>选择第二个目标:</label>
+                        <select id="nightActionSecondTarget" class="form-select" onchange="updateNightActionSecondTarget(this.value); generateInfoForTarget();">
+                            <option value="">-- 选择目标 --</option>
+                            ${allPlayers.filter(p => p.id !== item.player_id).map(p => 
+                                `<option value="${p.id}">${p.name}${p.alive ? '' : ' (死亡)'}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    ` : ''}
+                    <div id="infoResult" style="margin-top: var(--spacing-md); padding: var(--spacing-md); background: rgba(0,0,0,0.3); border-radius: var(--radius-md);">
+                        <p id="generatedInfo" style="color: var(--text-muted);">选择目标后将自动生成信息</p>
+                        <div id="infoMessageBox" style="display: none; margin-top: var(--spacing-sm); padding: var(--spacing-md); background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(0, 0, 0, 0.3)); border-radius: var(--radius-md); border: 1px solid var(--color-blood);">
+                            <p id="infoMessage" style="color: var(--color-gold); font-weight: 500;"></p>
+                        </div>
+                        <div style="margin-top: var(--spacing-md);">
+                            <label style="font-size: 0.85rem; color: var(--text-muted);">自定义/修改信息 (可选):</label>
+                            <textarea id="infoResultText" class="form-textarea" placeholder="如需修改自动生成的信息，在此输入..." style="width: 100%; margin-top: var(--spacing-sm); min-height: 60px; background: var(--bg-card-hover); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-sm); color: var(--text-primary); padding: var(--spacing-sm);"></textarea>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    } else if (item.action_type === 'grandchild_select') {
+        // 祖母 - 选择孙子
+        // 只能选择镇民作为孙子
+        const townsfolkPlayers = alivePlayers.filter(p => 
+            p.id !== item.player_id && p.role_type === 'townsfolk'
+        );
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-townsfolk); margin-bottom: var(--spacing-md);">👵 祖母 - 选择孙子</h5>
+                <div class="target-select-group">
+                    <label>选择谁是祖母的孙子:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value); updateGrandchildPreview();">
+                        <option value="">-- 选择孙子 --</option>
+                        ${townsfolkPlayers.map(p => 
+                            `<option value="${p.id}">${p.name} (${p.role?.name || '未知'})</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div id="grandchildPreview" style="margin-top: var(--spacing-md); padding: var(--spacing-md); background: rgba(0,0,0,0.3); border-radius: var(--radius-md); display: none;">
+                    <p style="color: var(--color-gold);">📋 将告知祖母的信息:</p>
+                    <p id="grandchildInfo" style="margin-top: var(--spacing-sm);"></p>
+                </div>
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    祖母会得知孙子是谁及其角色。如果恶魔杀死孙子，祖母也会死亡。<br>
+                    被选中的玩家会显示 👶 孙子标记。
+                </p>
+            </div>
+        `;
+    } else if (item.action_type === 'butler_master') {
+        // 管家 - 选择主人
+        const actionPlayer = gameState.players.find(p => p.id === item.player_id);
+        const currentMaster = actionPlayer?.butler_master_id ? 
+            gameState.players.find(p => p.id === actionPlayer.butler_master_id) : null;
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-outsider); margin-bottom: var(--spacing-md);">🎩 管家 - 选择主人</h5>
+                ${currentMaster ? `
+                <div style="padding: var(--spacing-sm); background: rgba(100, 100, 100, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <span style="color: var(--text-muted);">当前主人: <strong>${currentMaster.name}</strong></span>
+                </div>
+                ` : ''}
+                <div class="target-select-group">
+                    <label>选择你的主人（不包括自己）:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value);">
+                        <option value="">-- 选择主人 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}"${currentMaster && p.id === currentMaster.id ? ' selected' : ''}>${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    明天白天，只有当你的主人投赞成票时，你才能投赞成票。<br>
+                    被选中的玩家会显示 👑 主人标记。
+                </p>
+            </div>
+        `;
+    } else if (item.action_type === 'info_first_night') {
+        // 首夜信息类 - 自动生成信息
+        const actionPlayer = gameState.players.find(p => p.id === item.player_id);
+        const isDrunkOrPoisoned = actionPlayer && (actionPlayer.drunk || actionPlayer.poisoned);
+        
+        const infoResult = await apiCall(`/api/game/${gameState.gameId}/generate_info`, 'POST', {
+            player_id: item.player_id
+        });
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-townsfolk); margin-bottom: var(--spacing-md);">📜 首夜信息</h5>
+                ${isDrunkOrPoisoned ? `
+                <div style="padding: var(--spacing-sm); background: rgba(243, 156, 18, 0.2); border: 1px solid var(--color-drunk); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <span style="color: var(--color-drunk);">⚠️ 该玩家处于${actionPlayer.drunk ? '醉酒' : '中毒'}状态，信息可能不准确</span>
+                </div>
+                ` : ''}
+                <div class="info-message" style="padding: var(--spacing-md); background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(0, 0, 0, 0.3)); border-radius: var(--radius-lg); border: 1px solid var(--color-blood);">
+                    <p style="color: var(--color-gold); font-weight: 500;">${infoResult.message || '请根据角色能力提供相应信息'}</p>
+                    ${infoResult.is_drunk_or_poisoned ? '<p style="color: var(--color-drunk); font-size: 0.85rem; margin-top: var(--spacing-sm);">（玩家处于异常状态，可酌情提供错误信息）</p>' : ''}
+                </div>
+                <div style="margin-top: var(--spacing-md);">
+                    <label style="font-size: 0.85rem; color: var(--text-muted);">自定义/修改信息 (可选):</label>
+                    <textarea id="infoResultText" class="form-textarea" placeholder="如需修改信息，在此输入..." style="width: 100%; margin-top: var(--spacing-sm); min-height: 60px; background: var(--bg-card-hover); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-sm); color: var(--text-primary); padding: var(--spacing-sm);"></textarea>
+                </div>
+            </div>
+        `;
+    } else {
+        // 其他类型 - 通用界面
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-gold); margin-bottom: var(--spacing-md);">⚡ 角色能力</h5>
+                <div class="target-select-group">
+                    <label>选择目标 (可选):</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 不选择 --</option>
+                        ${allPlayers.map(p => 
+                            `<option value="${p.id}">${p.name}${p.alive ? '' : ' (死亡)'}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div style="margin-top: var(--spacing-md);">
+                    <label>行动备注:</label>
+                    <textarea id="infoResultText" class="form-textarea" placeholder="记录行动结果..." style="width: 100%; margin-top: var(--spacing-sm); min-height: 60px; background: var(--bg-card-hover); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-sm); color: var(--text-primary); padding: var(--spacing-sm);"></textarea>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 组合完整内容
+    infoContent.innerHTML = `
+        ${headerHTML}
+        ${actionUI}
+        <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-md); justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-secondary" onclick="skipNightAction(${index})">跳过此行动</button>
+            <button class="btn btn-primary" onclick="completeNightActionWithTarget(${index})">确认行动</button>
+        </div>
+    `;
+    
+    showModal('infoModal');
+}
+
+function updateNightActionTarget(value) {
+    currentNightActionTarget = value ? parseInt(value) : null;
+    
+    // 检查是否有保护（仅对击杀类显示警告）
+    const item = gameState.nightOrder[currentNightActionIndex];
+    if (item.action_type === 'kill' && currentNightActionTarget) {
+        const targetPlayer = gameState.players.find(p => p.id === currentNightActionTarget);
+        const warning = document.getElementById('protectionWarning');
+        if (warning && targetPlayer && targetPlayer.protected) {
+            warning.style.display = 'block';
+        } else if (warning) {
+            warning.style.display = 'none';
+        }
+    }
+}
+
+function updateNightActionSecondTarget(value) {
+    currentNightActionSecondTarget = value ? parseInt(value) : null;
+}
+
+function updateGrandchildPreview() {
+    const preview = document.getElementById('grandchildPreview');
+    const info = document.getElementById('grandchildInfo');
+    
+    if (currentNightActionTarget && preview && info) {
+        const targetPlayer = gameState.players.find(p => p.id === currentNightActionTarget);
+        if (targetPlayer) {
+            preview.style.display = 'block';
+            info.innerHTML = `你的孙子是 <strong style="color: var(--color-gold);">${targetPlayer.name}</strong>，` +
+                `他的角色是 <strong style="color: var(--color-townsfolk);">${targetPlayer.role?.name || '未知'}</strong>`;
+        }
+    } else if (preview) {
+        preview.style.display = 'none';
+    }
+}
+
+// 水手醉酒选择
+let currentSailorDrunkChoice = 'target';
+
+function updateSailorDrunkPreview() {
+    const choiceDiv = document.getElementById('sailorDrunkChoice');
+    const preview = document.getElementById('sailorDrunkPreview');
+    const nameSpan = document.getElementById('sailorDrunkName');
+    
+    if (currentNightActionTarget && choiceDiv && preview && nameSpan) {
+        choiceDiv.style.display = 'block';
+        updateSailorDrunkChoice(document.getElementById('sailorDrunkTarget')?.value || 'target');
+    } else if (choiceDiv) {
+        choiceDiv.style.display = 'none';
+        if (preview) preview.style.display = 'none';
+    }
+}
+
+function updateSailorDrunkChoice(value) {
+    currentSailorDrunkChoice = value;
+    const preview = document.getElementById('sailorDrunkPreview');
+    const nameSpan = document.getElementById('sailorDrunkName');
+    const item = gameState.nightOrder[currentNightActionIndex];
+    
+    if (preview && nameSpan && currentNightActionTarget) {
+        preview.style.display = 'block';
+        if (value === 'target') {
+            const targetPlayer = gameState.players.find(p => p.id === currentNightActionTarget);
+            nameSpan.textContent = targetPlayer ? targetPlayer.name : '目标玩家';
+        } else {
+            const sailorPlayer = gameState.players.find(p => p.id === item.player_id);
+            nameSpan.textContent = sailorPlayer ? sailorPlayer.name + ' (水手)' : '水手';
+        }
+    }
+}
+
+async function generateInfoForTarget() {
+    const item = gameState.nightOrder[currentNightActionIndex];
+    if (!item) return;
+    
+    // 判断是否需要两个目标
+    const needsTwoTargets = ['fortune_teller', 'seamstress', 'chambermaid'].includes(item.role_id);
+    
+    // 收集目标
+    const targets = [];
+    if (currentNightActionTarget) {
+        targets.push(currentNightActionTarget);
+    }
+    if (needsTwoTargets && currentNightActionSecondTarget) {
+        targets.push(currentNightActionSecondTarget);
+    }
+    
+    // 检查是否满足生成条件
+    const requiredTargets = needsTwoTargets ? 2 : 1;
+    const infoMessage = document.getElementById('infoMessage');
+    const infoMessageBox = document.getElementById('infoMessageBox');
+    const generatedInfo = document.getElementById('generatedInfo');
+    
+    if (!infoMessage || !infoMessageBox || !generatedInfo) return;
+    
+    if (targets.length < requiredTargets) {
+        generatedInfo.textContent = needsTwoTargets ? '请选择两名目标玩家' : '请选择目标玩家';
+        generatedInfo.style.display = 'block';
+        infoMessageBox.style.display = 'none';
+        return;
+    }
+    
+    // 调用API生成信息
+    try {
+        generatedInfo.textContent = '正在生成信息...';
+        generatedInfo.style.display = 'block';
+        
+        const result = await apiCall(`/api/game/${gameState.gameId}/generate_info`, 'POST', {
+            player_id: item.player_id,
+            targets: targets
+        });
+        
+        if (result && result.message) {
+            generatedInfo.style.display = 'none';
+            infoMessage.textContent = result.message;
+            infoMessageBox.style.display = 'block';
+            
+            // 如果有醉酒/中毒标记，添加提示
+            if (result.is_drunk_or_poisoned) {
+                infoMessage.innerHTML = `${result.message}<br><small style="color: var(--color-drunk);">（玩家处于异常状态，可酌情提供错误信息）</small>`;
+            }
+        } else {
+            generatedInfo.textContent = '无法生成信息，请手动输入';
+            generatedInfo.style.display = 'block';
+            infoMessageBox.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('生成信息失败:', error);
+        generatedInfo.textContent = '生成信息失败，请手动输入';
+        generatedInfo.style.display = 'block';
+        infoMessageBox.style.display = 'none';
+    }
+}
+
+async function skipNightAction(index) {
+    const item = gameState.nightOrder[index];
+    
+    // 记录跳过的行动
+    await apiCall(`/api/game/${gameState.gameId}/night_action`, 'POST', {
+        player_id: item.player_id,
+        action: item.role_name,
+        target: null,
+        result: '跳过',
+        action_type: 'skip'
+    });
+    
+    gameState.currentNightIndex = index + 1;
+    renderNightOrder();
+    closeModal('infoModal');
+    
+    addLogEntry(`${item.player_name} (${item.role_name}) 选择不行动`, 'night');
+}
+
+async function completeNightActionWithTarget(index) {
+    const item = gameState.nightOrder[index];
+    const target = currentNightActionTarget;
+    const secondTarget = currentNightActionSecondTarget;
+    const infoText = document.getElementById('infoResultText')?.value || '';
+    
+    // 构建行动数据
+    const actionData = {
+        player_id: item.player_id,
+        action: item.role_name,
+        target: target,
+        result: infoText || '已完成',
+        action_type: item.action_type
+    };
+    
+    // 如果有第二个目标，添加到结果中
+    if (secondTarget) {
+        actionData.result = `目标: ${target}, 第二目标: ${secondTarget}. ${infoText}`;
+    }
+    
+    // 如果是醉酒类行动，添加持续时间
+    if (item.action_type === 'drunk') {
+        const durationSelect = document.getElementById('drunkDuration');
+        const duration = durationSelect ? parseInt(durationSelect.value) : 3;
+        actionData.extra_data = { duration: duration };
+    }
+    
+    // 水手特殊处理：发送醉酒选择
+    if (item.action_type === 'sailor_drunk' && target) {
+        actionData.extra_data = { drunk_choice: currentSailorDrunkChoice };
+    }
+    
+    // 旅店老板特殊处理：发送第二个目标和醉酒目标
+    if (item.role_id === 'innkeeper' && item.action_type === 'protect' && secondTarget) {
+        const drunkTargetSelect = document.getElementById('drunkTarget');
+        const drunkChoice = drunkTargetSelect ? drunkTargetSelect.value : 'first';
+        const drunkTargetId = drunkChoice === 'first' ? target : secondTarget;
+        
+        actionData.extra_data = {
+            second_target: secondTarget,
+            drunk_target: drunkTargetId
+        };
+    }
+    
+    // 记录夜间行动
+    await apiCall(`/api/game/${gameState.gameId}/night_action`, 'POST', actionData);
+    
+    // 更新本地玩家状态
+    if (item.action_type === 'protect' && target) {
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        if (targetPlayer) {
+            targetPlayer.protected = true;
+        }
+        
+        // 旅店老板特殊处理：第二个目标也要保护，且其中一人醉酒
+        if (item.role_id === 'innkeeper' && secondTarget) {
+            const secondTargetPlayer = gameState.players.find(p => p.id === secondTarget);
+            if (secondTargetPlayer) {
+                secondTargetPlayer.protected = true;
+            }
+            
+            // 处理醉酒
+            const drunkTargetSelect = document.getElementById('drunkTarget');
+            const drunkChoice = drunkTargetSelect ? drunkTargetSelect.value : 'first';
+            const drunkPlayerId = drunkChoice === 'first' ? target : secondTarget;
+            const drunkPlayer = gameState.players.find(p => p.id === drunkPlayerId);
+            if (drunkPlayer) {
+                drunkPlayer.drunk = true;
+                drunkPlayer.drunk_until = {
+                    day: gameState.dayNumber + 1,
+                    night: gameState.nightNumber + 1
+                };
+            }
+        }
+    } else if (item.action_type === 'poison' && target) {
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        if (targetPlayer) {
+            targetPlayer.poisoned = true;
+        }
+    } else if (item.action_type === 'drunk' && target) {
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        if (targetPlayer) {
+            targetPlayer.drunk = true;
+            const durationSelect = document.getElementById('drunkDuration');
+            const duration = durationSelect ? parseInt(durationSelect.value) : 3;
+            targetPlayer.drunk_until = {
+                day: gameState.dayNumber + duration,
+                night: gameState.nightNumber + duration
+            };
+        }
+        // 标记一次性技能已使用
+        const actionPlayer = gameState.players.find(p => p.id === item.player_id);
+        if (actionPlayer) {
+            actionPlayer.ability_used = true;
+        }
+    } else if (item.action_type === 'grandchild_select' && target) {
+        // 祖母选择孙子
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        const grandmotherPlayer = gameState.players.find(p => p.id === item.player_id);
+        if (targetPlayer) {
+            targetPlayer.is_grandchild = true;
+            targetPlayer.grandchild_of = item.player_id;
+        }
+        if (grandmotherPlayer) {
+            grandmotherPlayer.grandchild_id = target;
+        }
+    } else if (item.action_type === 'sailor_drunk' && target) {
+        // 水手 - 自己或目标醉酒
+        const drunkPlayerId = currentSailorDrunkChoice === 'target' ? target : item.player_id;
+        const drunkPlayer = gameState.players.find(p => p.id === drunkPlayerId);
+        if (drunkPlayer) {
+            drunkPlayer.drunk = true;
+            drunkPlayer.drunk_until = {
+                day: gameState.dayNumber + 1,
+                night: gameState.nightNumber + 1
+            };
+        }
+    } else if (item.action_type === 'pukka_poison' && target) {
+        // 普卡 - 前一个目标清除中毒，新目标中毒
+        const pukkaPlayer = gameState.players.find(p => p.id === item.player_id);
+        
+        // 清除前一个目标的中毒状态
+        if (pukkaPlayer && pukkaPlayer.pukka_previous_target) {
+            const previousTarget = gameState.players.find(p => p.id === pukkaPlayer.pukka_previous_target);
+            if (previousTarget) {
+                previousTarget.poisoned = false;
+                previousTarget.poisoned_by_pukka = false;
+            }
+        }
+        
+        // 新目标中毒
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        if (targetPlayer) {
+            targetPlayer.poisoned = true;
+            targetPlayer.poisoned_by_pukka = true;
+        }
+        
+        // 记录新目标
+        if (pukkaPlayer) {
+            pukkaPlayer.pukka_previous_target = target;
+        }
+    } else if (item.action_type === 'butler_master' && target) {
+        // 管家 - 选择主人
+        const butlerPlayer = gameState.players.find(p => p.id === item.player_id);
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        
+        // 清除旧主人的标记
+        if (butlerPlayer && butlerPlayer.butler_master_id) {
+            const oldMaster = gameState.players.find(p => p.id === butlerPlayer.butler_master_id);
+            if (oldMaster) {
+                oldMaster.is_butler_master = false;
+            }
+        }
+        
+        // 设置新主人
+        if (butlerPlayer) {
+            butlerPlayer.butler_master_id = target;
+            butlerPlayer.butler_master_name = targetPlayer?.name || '';
+        }
+        if (targetPlayer) {
+            targetPlayer.is_butler_master = true;
+        }
+    }
+    
+    gameState.currentNightIndex = index + 1;
+    renderNightOrder();
+    renderPlayerCircle(); // 更新玩家圈显示状态
+    closeModal('infoModal');
+    
+    // 生成日志
+    let logMessage = `${item.player_name} (${item.role_name}) 完成了夜间行动`;
+    if (target) {
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        if (targetPlayer) {
+            logMessage += ` -> ${targetPlayer.name}`;
+        }
+    }
+    addLogEntry(logMessage, 'night');
+}
+
+// completeNightAction 已被 completeNightActionWithTarget 替代
+
+async function startDay() {
+    const result = await apiCall(`/api/game/${gameState.gameId}/start_day`, 'POST');
+    
+    if (!result.success) {
+        alert(result.error || '开始白天失败');
+        return;
+    }
+    
+    gameState.currentPhase = 'day';
+    gameState.dayNumber = result.day_number;
+    gameState.nominations = [];
+    
+    // 重置所有玩家的保护状态（保护只持续一夜）
+    gameState.players.forEach(p => {
+        p.protected = false;
+    });
+    
+    // 处理夜间死亡
+    if (result.night_deaths && result.night_deaths.length > 0) {
+        result.night_deaths.forEach(death => {
+            const player = gameState.players.find(p => p.id === death.player_id);
+            if (player) {
+                player.alive = false;
+            }
+            addLogEntry(`${death.player_name} 在夜间死亡 (${death.cause})`, 'death');
+        });
+    } else {
+        addLogEntry('今晚无人死亡', 'phase');
+    }
+    
+    // 检查游戏结束
+    if (result.game_end && result.game_end.ended) {
+        showGameEnd(result.game_end);
+        return;
+    }
+    
+    updatePhaseIndicator('day');
+    updateDayNightIndicator();
+    renderPlayerCircle();
+    updatePlayerSelects();
+    
+    // 显示提名面板，隐藏夜间面板
+    document.getElementById('nightPanel').style.display = 'none';
+    document.getElementById('nominationPanel').style.display = 'block';
+    
+    // 更新按钮状态
+    document.getElementById('startNightBtn').disabled = false;
+    document.getElementById('startDayBtn').disabled = true;
+    
+    addLogEntry(`第 ${gameState.dayNumber} 天开始`, 'phase');
+}
+
+function updatePhaseIndicator(phase) {
+    const indicator = document.getElementById('phaseIndicator');
+    if (phase === 'night') {
+        indicator.textContent = `第 ${gameState.nightNumber} 夜`;
+        indicator.className = 'phase-indicator night';
+    } else if (phase === 'day') {
+        indicator.textContent = `第 ${gameState.dayNumber} 天`;
+        indicator.className = 'phase-indicator day';
+    } else {
+        indicator.textContent = '设置中';
+        indicator.className = 'phase-indicator';
+    }
+}
+
+function updateDayNightIndicator() {
+    const indicator = document.getElementById('dayNightIndicator');
+    if (gameState.currentPhase === 'night') {
+        indicator.innerHTML = `
+            <span class="indicator-icon">🌙</span>
+            <span class="indicator-text">第 ${gameState.nightNumber} 夜</span>
+        `;
+    } else {
+        indicator.innerHTML = `
+            <span class="indicator-icon">☀️</span>
+            <span class="indicator-text">第 ${gameState.dayNumber} 天</span>
+        `;
+    }
+}
+
+// ===== 提名与投票 =====
+async function handleNominate() {
+    const nominatorId = parseInt(document.getElementById('nominatorSelect').value);
+    const nomineeId = parseInt(document.getElementById('nomineeSelect').value);
+    
+    if (!nominatorId || !nomineeId) {
+        alert('请选择提名者和被提名者');
+        return;
+    }
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/nominate`, 'POST', {
+        nominator_id: nominatorId,
+        nominee_id: nomineeId
+    });
+    
+    if (!result.success) {
+        alert(result.error || '提名失败');
+        return;
+    }
+    
+    gameState.nominations.push(result.nomination);
+    
+    // 检查贞洁者能力是否触发
+    if (result.virgin_triggered) {
+        // 更新提名者状态为死亡
+        const nominator = gameState.players.find(p => p.id === nominatorId);
+        if (nominator) {
+            nominator.alive = false;
+        }
+        
+        // 更新被提名者（贞洁者）的能力已使用状态
+        const nominee = gameState.players.find(p => p.id === nomineeId);
+        if (nominee) {
+            nominee.virgin_ability_used = true;
+        }
+        
+        renderPlayerCircle();
+        renderNominations();
+        addLogEntry(`⚡ 贞洁者能力触发！${result.executed_player} 是镇民，立即被处决！`, 'execution');
+        
+        // 显示贞洁者能力触发提示
+        const confirmNight = confirm(
+            `⚡ 贞洁者能力触发！\n\n` +
+            `${result.executed_player} 提名了贞洁者，由于是镇民，立即被处决！\n\n` +
+            `是否立即进入夜晚？`
+        );
+        
+        if (confirmNight) {
+            await startNight();
+        }
+        
+        return;
+    }
+    
+    renderNominations();
+    
+    // 重置选择框
+    document.getElementById('nominatorSelect').value = '';
+    document.getElementById('nomineeSelect').value = '';
+}
+
+function renderNominations() {
+    const list = document.getElementById('nominationsList');
+    
+    if (gameState.nominations.length === 0) {
+        list.innerHTML = '<p style="color: var(--text-muted); text-align: center;">暂无提名</p>';
+        return;
+    }
+    
+    list.innerHTML = gameState.nominations.map(nom => `
+        <div class="nomination-item ${nom.status === 'executed' ? 'executed' : ''} ${nom.status === 'failed' ? 'failed' : ''} ${nom.status === 'virgin_triggered' ? 'virgin-triggered' : ''}">
+            <div class="nomination-info">
+                <span>${nom.nominator_name}${nom.status === 'virgin_triggered' ? ' 💀' : ''}</span>
+                <span style="color: var(--color-blood);">➜</span>
+                <span>${nom.nominee_name}${nom.status === 'virgin_triggered' ? ' (贞洁者)' : ''}</span>
+            </div>
+            <div class="nomination-votes">
+                ${nom.status === 'virgin_triggered' ? 
+                    '<span style="color: var(--color-blood); font-size: 0.85rem;">⚡ 贞洁者能力触发</span>' :
+                    `<span class="vote-count-badge">${nom.vote_count} 票</span>
+                    ${nom.status === 'pending' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.8rem;" onclick="openVoteModal(${nom.id})">投票</button>` : ''}`
+                }
+            </div>
+        </div>
+    `).join('');
+}
+
+let currentNominationId = null;
+
+function openVoteModal(nominationId) {
+    currentNominationId = nominationId;
+    const nomination = gameState.nominations.find(n => n.id === nominationId);
+    
+    const alivePlayers = gameState.players.filter(p => p.alive);
+    const requiredVotes = Math.floor(alivePlayers.length / 2) + 1;
+    
+    document.getElementById('voteModalTitle').textContent = `投票: ${nomination.nominee_name}`;
+    document.getElementById('voteInfo').innerHTML = `
+        <p><strong>${nomination.nominator_name}</strong> 提名了 <strong>${nomination.nominee_name}</strong></p>
+        <p>需要 <strong>${requiredVotes}</strong> 票才能执行处决</p>
+    `;
+    
+    // 生成投票格子
+    const voteGrid = document.getElementById('voteGrid');
+    voteGrid.innerHTML = gameState.players.map(player => {
+        const voted = nomination.votes?.find(v => v.voter_id === player.id);
+        const votedClass = voted ? (voted.vote ? 'voted-yes' : 'voted-no') : '';
+        const deadClass = !player.alive ? 'dead' : '';
+        const canVote = player.alive || player.vote_token;
+        
+        return `
+            <div class="vote-player ${votedClass} ${deadClass}">
+                <span class="vote-player-name">${player.name}</span>
+                <div class="vote-buttons">
+                    ${voted ? 
+                        `<span style="font-size: 0.8rem;">${voted.vote ? '✓' : '✗'}</span>` :
+                        `<button class="vote-btn yes" onclick="castVote(${nomination.id}, ${player.id}, true)" ${!canVote ? 'disabled' : ''}>✓</button>
+                         <button class="vote-btn no" onclick="castVote(${nomination.id}, ${player.id}, false)" ${!canVote ? 'disabled' : ''}>✗</button>`
+                    }
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    updateVoteCount(nomination);
+    showModal('voteModal');
+}
+
+async function castVote(nominationId, voterId, vote) {
+    const result = await apiCall(`/api/game/${gameState.gameId}/vote`, 'POST', {
+        nomination_id: nominationId,
+        voter_id: voterId,
+        vote: vote
+    });
+    
+    if (!result.success) {
+        alert(result.error || '投票失败');
+        return;
+    }
+    
+    // 更新本地数据
+    const nomination = gameState.nominations.find(n => n.id === nominationId);
+    if (!nomination.votes) nomination.votes = [];
+    
+    const voter = gameState.players.find(p => p.id === voterId);
+    nomination.votes.push({
+        voter_id: voterId,
+        voter_name: voter.name,
+        vote: vote
+    });
+    
+    if (vote) {
+        nomination.vote_count++;
+    }
+    
+    // 如果是死亡玩家投赞成票，消耗令牌
+    if (!voter.alive && vote) {
+        voter.vote_token = false;
+    }
+    
+    // 刷新投票界面
+    openVoteModal(nominationId);
+}
+
+function updateVoteCount(nomination) {
+    document.getElementById('yesVotes').textContent = nomination.vote_count || 0;
+    const alivePlayers = gameState.players.filter(p => p.alive);
+    document.getElementById('requiredVotes').textContent = Math.floor(alivePlayers.length / 2) + 1;
+}
+
+async function handleExecute() {
+    if (!currentNominationId) return;
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/execute`, 'POST', {
+        nomination_id: currentNominationId
+    });
+    
+    if (!result.success) {
+        alert(result.error || '处决失败');
+        return;
+    }
+    
+    const nomination = gameState.nominations.find(n => n.id === currentNominationId);
+    
+    if (result.executed) {
+        nomination.status = 'executed';
+        const player = gameState.players.find(p => p.id === nomination.nominee_id);
+        if (player) {
+            player.alive = false;
+        }
+        addLogEntry(`${nomination.nominee_name} 被处决`, 'execution');
+    } else {
+        nomination.status = 'failed';
+        addLogEntry(`${nomination.nominee_name} 未获得足够票数，逃过一劫`, 'execution');
+    }
+    
+    closeModal('voteModal');
+    renderNominations();
+    renderPlayerCircle();
+    updatePlayerSelects();
+    
+    // 检查游戏结束
+    if (result.game_end && result.game_end.ended) {
+        showGameEnd(result.game_end);
+    }
+}
+
+// ===== 玩家详情 =====
+function openPlayerDetail(playerId) {
+    const player = gameState.players.find(p => p.id === playerId);
+    if (!player) return;
+    
+    document.getElementById('playerDetailName').textContent = player.name;
+    
+    const roleTypeLabels = {
+        townsfolk: '镇民',
+        outsider: '外来者',
+        minion: '爪牙',
+        demon: '恶魔'
+    };
+    
+    const avatarClass = player.alive ? '' : 'dead';
+    const avatarIcon = player.alive ? '👤' : '💀';
+    
+    document.getElementById('playerDetailContent').innerHTML = `
+        <div class="player-detail-avatar ${avatarClass}">${avatarIcon}</div>
+        <div class="player-detail-role" style="color: var(--color-${player.role_type || 'text-primary'});">
+            ${player.role?.name || '未分配角色'}
+        </div>
+        <div class="player-detail-type">${roleTypeLabels[player.role_type] || ''}</div>
+        <div class="player-detail-ability">
+            <strong>能力:</strong><br>
+            ${player.role?.ability || '无'}
+        </div>
+        <div class="player-status-controls">
+            <label class="status-toggle ${player.poisoned ? 'active' : ''}" onclick="toggleStatus(${player.id}, 'poisoned')">
+                <input type="checkbox" ${player.poisoned ? 'checked' : ''}>
+                🧪 中毒
+            </label>
+            <label class="status-toggle ${player.drunk ? 'active' : ''}" onclick="toggleStatus(${player.id}, 'drunk')">
+                <input type="checkbox" ${player.drunk ? 'checked' : ''}>
+                🍺 醉酒
+            </label>
+            <label class="status-toggle ${player.protected ? 'active' : ''}" onclick="toggleStatus(${player.id}, 'protected')">
+                <input type="checkbox" ${player.protected ? 'checked' : ''}>
+                🛡️ 保护
+            </label>
+        </div>
+        <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-md); justify-content: center; flex-wrap: wrap;">
+            ${player.alive ? 
+                `<button class="btn btn-danger" onclick="killPlayer(${player.id})">☠️ 杀死</button>` :
+                `<button class="btn btn-primary" onclick="revivePlayer(${player.id})">✨ 复活</button>`
+            }
+            <button class="btn btn-secondary" onclick="generatePlayerInfo(${player.id})">🔮 生成信息</button>
+        </div>
+    `;
+    
+    showModal('playerDetailModal');
+}
+
+async function toggleStatus(playerId, statusType) {
+    const player = gameState.players.find(p => p.id === playerId);
+    if (!player) return;
+    
+    const newValue = !player[statusType];
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/player_status`, 'POST', {
+        player_id: playerId,
+        status_type: statusType,
+        value: newValue
+    });
+    
+    if (result.success) {
+        player[statusType] = newValue;
+        renderPlayerCircle();
+        openPlayerDetail(playerId);
+    }
+}
+
+async function killPlayer(playerId) {
+    const result = await apiCall(`/api/game/${gameState.gameId}/kill_player`, 'POST', {
+        player_id: playerId,
+        cause: '说书人判定'
+    });
+    
+    if (result.success) {
+        const player = gameState.players.find(p => p.id === playerId);
+        player.alive = false;
+        renderPlayerCircle();
+        updatePlayerSelects();
+        closeModal('playerDetailModal');
+        
+        addLogEntry(`${player.name} 死亡 (说书人判定)`, 'death');
+        
+        if (result.game_end && result.game_end.ended) {
+            showGameEnd(result.game_end);
+        }
+    }
+}
+
+async function revivePlayer(playerId) {
+    const result = await apiCall(`/api/game/${gameState.gameId}/revive_player`, 'POST', {
+        player_id: playerId
+    });
+    
+    if (result.success) {
+        const player = gameState.players.find(p => p.id === playerId);
+        player.alive = true;
+        player.vote_token = true;
+        renderPlayerCircle();
+        updatePlayerSelects();
+        closeModal('playerDetailModal');
+        
+        addLogEntry(`${player.name} 复活了`, 'revive');
+    }
+}
+
+async function generatePlayerInfo(playerId) {
+    const result = await apiCall(`/api/game/${gameState.gameId}/generate_info`, 'POST', {
+        player_id: playerId
+    });
+    
+    closeModal('playerDetailModal');
+    
+    const player = gameState.players.find(p => p.id === playerId);
+    document.getElementById('infoContent').innerHTML = `
+        <h4 style="margin-bottom: var(--spacing-md); color: var(--color-gold);">${player.name} - ${player.role?.name || '未知角色'}</h4>
+        <div class="info-message">
+            ${result.message || '无法生成信息'}
+        </div>
+    `;
+    
+    showModal('infoModal');
+}
+
+// ===== 夜间死亡 =====
+async function addNightDeath(playerId, cause = '恶魔击杀') {
+    await apiCall(`/api/game/${gameState.gameId}/night_death`, 'POST', {
+        player_id: playerId,
+        cause: cause
+    });
+}
+
+// ===== 游戏结束 =====
+function showGameEnd(gameEnd) {
+    const content = document.getElementById('gameEndContent');
+    const winnerText = gameEnd.winner === 'good' ? '善良阵营获胜！' : '邪恶阵营获胜！';
+    const winnerClass = gameEnd.winner;
+    
+    content.innerHTML = `
+        <div class="game-end-winner ${winnerClass}">${winnerText}</div>
+        <div class="game-end-reason">${gameEnd.reason}</div>
+        <div style="margin-top: var(--spacing-xl);">
+            <h4 style="color: var(--color-gold); margin-bottom: var(--spacing-md);">角色揭示</h4>
+            ${gameState.players.map(p => `
+                <div style="display: flex; justify-content: space-between; padding: var(--spacing-sm); border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <span>${p.name} ${p.alive ? '' : '†'}</span>
+                    <span style="color: var(--color-${p.role_type});">${p.role?.name || '未知'}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    
+    showModal('gameEndModal');
+}
+
+// ===== 日志 =====
+function addLogEntry(message, type = 'info') {
+    const log = document.getElementById('gameLog');
+    const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    log.innerHTML = `
+        <div class="log-entry ${type}">
+            <span class="log-time">[${time}]</span>
+            ${message}
+        </div>
+    ` + log.innerHTML;
+}
+
+// ===== 弹窗控制 =====
+function showModal(modalId) {
+    document.getElementById(modalId).classList.add('show');
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).classList.remove('show');
+}
+
+// 点击弹窗外部关闭
+document.querySelectorAll('.modal').forEach(modal => {
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.classList.remove('show');
+        }
+    });
+});
+
+// ESC 关闭弹窗
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.modal.show').forEach(modal => {
+            modal.classList.remove('show');
+        });
+    }
+});
+
