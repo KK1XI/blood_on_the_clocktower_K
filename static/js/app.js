@@ -293,6 +293,99 @@ function startGame() {
     
     // 添加日志
     addLogEntry('游戏开始', 'phase');
+    
+    // 检查是否有占卜师，如果有则提示设置红鲱鱼
+    checkFortuneTellerSetup();
+}
+
+// 检查占卜师红鲱鱼设置
+async function checkFortuneTellerSetup() {
+    const fortuneTeller = gameState.players.find(p => p.role && p.role.id === 'fortune_teller');
+    if (fortuneTeller) {
+        // 显示红鲱鱼设置弹窗
+        showRedHerringModal();
+    }
+}
+
+function showRedHerringModal() {
+    const modal = document.getElementById('redHerringModal');
+    if (!modal) {
+        // 创建弹窗
+        createRedHerringModal();
+    }
+    document.getElementById('redHerringModal').classList.add('active');
+    updateRedHerringOptions();
+}
+
+function createRedHerringModal() {
+    const modalHtml = `
+        <div class="modal" id="redHerringModal">
+            <div class="modal-content">
+                <h3>🔮 设置占卜师的红鲱鱼</h3>
+                <p>请选择一名善良玩家作为红鲱鱼（占卜师会把该玩家误认为恶魔）</p>
+                <div class="form-group">
+                    <select id="redHerringSelect" class="form-select">
+                        <option value="">-- 选择玩家 --</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="confirmRedHerring()">确认</button>
+                    <button class="btn btn-secondary" onclick="skipRedHerring()">随机选择</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function updateRedHerringOptions() {
+    const select = document.getElementById('redHerringSelect');
+    const goodPlayers = gameState.players.filter(p => 
+        (p.role_type === 'townsfolk' || p.role_type === 'outsider') && 
+        p.role.id !== 'fortune_teller'
+    );
+    
+    select.innerHTML = '<option value="">-- 选择玩家 --</option>' + 
+        goodPlayers.map(p => `<option value="${p.id}">${p.name} (${p.role.name})</option>`).join('');
+}
+
+async function confirmRedHerring() {
+    const targetId = document.getElementById('redHerringSelect').value;
+    if (!targetId) {
+        alert('请选择一名玩家');
+        return;
+    }
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/set_red_herring`, 'POST', {
+        target_id: parseInt(targetId)
+    });
+    
+    if (result.success) {
+        addLogEntry(`占卜师的红鲱鱼已设置为 ${result.red_herring}`, 'setup');
+        document.getElementById('redHerringModal').classList.remove('active');
+    } else {
+        alert(result.error || '设置失败');
+    }
+}
+
+async function skipRedHerring() {
+    // 随机选择一名善良玩家
+    const goodPlayers = gameState.players.filter(p => 
+        (p.role_type === 'townsfolk' || p.role_type === 'outsider') && 
+        p.role.id !== 'fortune_teller'
+    );
+    
+    if (goodPlayers.length > 0) {
+        const randomPlayer = goodPlayers[Math.floor(Math.random() * goodPlayers.length)];
+        const result = await apiCall(`/api/game/${gameState.gameId}/set_red_herring`, 'POST', {
+            target_id: randomPlayer.id
+        });
+        
+        if (result.success) {
+            addLogEntry(`占卜师的红鲱鱼已随机设置为 ${result.red_herring}`, 'setup');
+        }
+    }
+    document.getElementById('redHerringModal').classList.remove('active');
 }
 
 function renderPlayerCircle() {
@@ -325,6 +418,8 @@ function renderPlayerCircle() {
         if (player.ability_used) statusIcons += '<span class="status-icon used-icon" title="技能已用">✗</span>';
         if (player.is_grandchild) statusIcons += '<span class="status-icon grandchild-icon" title="祖母的孙子">👶</span>';
         if (player.is_butler_master) statusIcons += '<span class="status-icon master-icon" title="管家的主人">👑</span>';
+        if (player.is_red_herring) statusIcons += '<span class="status-icon red-herring-icon" title="占卜师的红鲱鱼">🐟</span>';
+        if (player.ravenkeeper_triggered) statusIcons += '<span class="status-icon ravenkeeper-icon" title="守鸦人待唤醒">🦅</span>';
         
         // 生成左下角标记HTML（酒鬼标记）
         let leftIcons = '';
@@ -1190,6 +1285,15 @@ async function completeNightActionWithTarget(index) {
 // completeNightAction 已被 completeNightActionWithTarget 替代
 
 async function startDay() {
+    // 检查镇长替死
+    const mayorCheck = await checkMayorSubstitute();
+    if (mayorCheck === 'cancelled') {
+        return; // 用户取消了操作
+    }
+    
+    // 检查守鸦人是否被触发
+    await checkRavenkeeperTrigger();
+    
     const result = await apiCall(`/api/game/${gameState.gameId}/start_day`, 'POST');
     
     if (!result.success) {
@@ -1239,6 +1343,165 @@ async function startDay() {
     document.getElementById('startDayBtn').disabled = true;
     
     addLogEntry(`第 ${gameState.dayNumber} 天开始`, 'phase');
+}
+
+// 检查镇长替死
+async function checkMayorSubstitute() {
+    // 检查恶魔击杀目标是否包含镇长
+    const mayor = gameState.players.find(p => p.role && p.role.id === 'mayor' && p.alive);
+    if (!mayor) return 'continue';
+    
+    // 检查镇长是否被恶魔选中（需要从后端获取）
+    const result = await apiCall(`/api/game/${gameState.gameId}/status`);
+    const demonKills = result.demon_kills || [];
+    
+    const mayorTargeted = demonKills.some(k => k.target_id === mayor.id);
+    if (!mayorTargeted) return 'continue';
+    
+    // 镇长没有中毒或醉酒
+    if (mayor.poisoned || mayor.drunk) return 'continue';
+    
+    // 显示镇长替死选择弹窗
+    return new Promise((resolve) => {
+        showMayorSubstituteModal(mayor, resolve);
+    });
+}
+
+function showMayorSubstituteModal(mayor, resolve) {
+    let modal = document.getElementById('mayorSubstituteModal');
+    if (!modal) {
+        const modalHtml = `
+            <div class="modal" id="mayorSubstituteModal">
+                <div class="modal-content">
+                    <h3>🏛️ 镇长能力触发</h3>
+                    <p>镇长 <strong>${mayor.name}</strong> 即将被恶魔杀死</p>
+                    <p>你可以选择让另一名玩家替镇长死亡，或让镇长自己死亡</p>
+                    <div class="form-group">
+                        <label>选择替死的玩家：</label>
+                        <select id="mayorSubstituteSelect" class="form-select">
+                            <option value="">-- 让镇长自己死亡 --</option>
+                        </select>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-primary" id="confirmMayorSubstitute">确认</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        modal = document.getElementById('mayorSubstituteModal');
+    }
+    
+    // 更新选项
+    const select = document.getElementById('mayorSubstituteSelect');
+    const otherPlayers = gameState.players.filter(p => p.id !== mayor.id && p.alive);
+    select.innerHTML = '<option value="">-- 让镇长自己死亡 --</option>' + 
+        otherPlayers.map(p => `<option value="${p.id}">${p.name} (${p.role?.name || '未知'})</option>`).join('');
+    
+    modal.classList.add('active');
+    
+    document.getElementById('confirmMayorSubstitute').onclick = async () => {
+        const substituteId = select.value;
+        
+        const result = await apiCall(`/api/game/${gameState.gameId}/mayor_substitute`, 'POST', {
+            substitute_id: substituteId ? parseInt(substituteId) : null
+        });
+        
+        if (result.success) {
+            if (result.substitute) {
+                addLogEntry(`镇长的能力触发，${result.substitute} 替镇长死亡`, 'night');
+            } else {
+                addLogEntry(`镇长选择不使用替死能力`, 'night');
+            }
+        }
+        
+        modal.classList.remove('active');
+        resolve('continue');
+    };
+}
+
+// 检查守鸦人是否被触发
+async function checkRavenkeeperTrigger() {
+    const result = await apiCall(`/api/game/${gameState.gameId}/check_ravenkeeper`);
+    
+    if (result.triggered) {
+        // 显示守鸦人选择弹窗
+        await showRavenkeeperModal(result.player_id, result.player_name);
+    }
+}
+
+function showRavenkeeperModal(ravenkeeperPlayerId, ravenkeeperName) {
+    return new Promise((resolve) => {
+        let modal = document.getElementById('ravenkeeperModal');
+        if (!modal) {
+            const modalHtml = `
+                <div class="modal" id="ravenkeeperModal">
+                    <div class="modal-content">
+                        <h3>🦅 守鸦人唤醒</h3>
+                        <p>守鸦人 <strong id="ravenkeeperPlayerName"></strong> 在夜间死亡，被唤醒选择一名玩家</p>
+                        <div class="form-group">
+                            <label>选择要查看身份的玩家：</label>
+                            <select id="ravenkeeperTargetSelect" class="form-select">
+                                <option value="">-- 选择玩家 --</option>
+                            </select>
+                        </div>
+                        <div id="ravenkeeperInfoResult" class="info-message" style="display:none;"></div>
+                        <div class="modal-actions">
+                            <button class="btn btn-primary" id="confirmRavenkeeper">确认并查看</button>
+                            <button class="btn btn-secondary" id="closeRavenkeeper" style="display:none;">关闭</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            modal = document.getElementById('ravenkeeperModal');
+        }
+        
+        document.getElementById('ravenkeeperPlayerName').textContent = ravenkeeperName;
+        
+        // 更新选项
+        const select = document.getElementById('ravenkeeperTargetSelect');
+        select.innerHTML = '<option value="">-- 选择玩家 --</option>' + 
+            gameState.players.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+        
+        document.getElementById('ravenkeeperInfoResult').style.display = 'none';
+        document.getElementById('closeRavenkeeper').style.display = 'none';
+        document.getElementById('confirmRavenkeeper').style.display = 'inline-block';
+        
+        modal.classList.add('active');
+        
+        document.getElementById('confirmRavenkeeper').onclick = async () => {
+            const targetId = select.value;
+            if (!targetId) {
+                alert('请选择一名玩家');
+                return;
+            }
+            
+            // 生成守鸦人信息
+            const info = await apiCall(`/api/game/${gameState.gameId}/generate_info`, 'POST', {
+                player_id: ravenkeeperPlayerId,
+                targets: [parseInt(targetId)]
+            });
+            
+            document.getElementById('ravenkeeperInfoResult').textContent = info.message;
+            document.getElementById('ravenkeeperInfoResult').style.display = 'block';
+            
+            if (info.is_drunk_or_poisoned) {
+                document.getElementById('ravenkeeperInfoResult').innerHTML += 
+                    '<br><span class="warning">⚠️ 守鸦人中毒或醉酒，信息可能有误</span>';
+            }
+            
+            document.getElementById('confirmRavenkeeper').style.display = 'none';
+            document.getElementById('closeRavenkeeper').style.display = 'inline-block';
+            
+            addLogEntry(`守鸦人 ${ravenkeeperName} 查看了 ${gameState.players.find(p => p.id == targetId)?.name} 的身份`, 'night');
+        };
+        
+        document.getElementById('closeRavenkeeper').onclick = () => {
+            modal.classList.remove('active');
+            resolve();
+        };
+    });
 }
 
 function updatePhaseIndicator(phase) {
@@ -1461,6 +1724,11 @@ async function handleExecute() {
             player.alive = false;
         }
         addLogEntry(`${nomination.nominee_name} 被处决`, 'execution');
+        
+        // 检查圣徒被处决
+        if (result.saint_executed) {
+            addLogEntry(`⚡ 圣徒 ${nomination.nominee_name} 被处决！邪恶阵营获胜！`, 'game_end');
+        }
     } else {
         nomination.status = 'failed';
         addLogEntry(`${nomination.nominee_name} 未获得足够票数，逃过一劫`, 'execution');
@@ -1471,9 +1739,11 @@ async function handleExecute() {
     renderPlayerCircle();
     updatePlayerSelects();
     
-    // 检查游戏结束
-    if (result.game_end && result.game_end.ended) {
-        showGameEnd(result.game_end);
+    // 检查游戏结束（包括圣徒触发）
+    const gameEnd = result.game_end || (result.saint_executed ? 
+        {ended: true, winner: 'evil', reason: '圣徒被处决'} : null);
+    if (gameEnd && gameEnd.ended) {
+        showGameEnd(gameEnd);
     }
 }
 

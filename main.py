@@ -168,6 +168,17 @@ class Game:
             self.players.append(player)
         
         self.add_log(f"已随机分配 {len(player_names)} 名玩家的角色", "setup")
+        
+        # 检查是否有占卜师，如果有，需要设置红鲱鱼
+        fortune_teller = next((p for p in self.players if p.get("role") and p["role"].get("id") == "fortune_teller"), None)
+        if fortune_teller:
+            # 随机选择一名善良玩家作为红鲱鱼
+            good_players = [p for p in self.players if p["role_type"] in ["townsfolk", "outsider"] and p["id"] != fortune_teller["id"]]
+            if good_players:
+                red_herring = random.choice(good_players)
+                fortune_teller["red_herring_id"] = red_herring["id"]
+                self.add_log(f"占卜师的红鲱鱼已设置（需说书人在开局时确认或修改）", "setup")
+        
         return self.players
     
     def assign_roles_manually(self, assignments):
@@ -261,13 +272,20 @@ class Game:
             # 检查醉酒状态是否过期
             if player.get("drunk") and player.get("drunk_until"):
                 until = player["drunk_until"]
-                if until.get("night") and self.night_number > until["night"]:
+                if until.get("permanent"):
+                    pass  # 永久醉酒（酒鬼）不清除
+                elif until.get("night") and self.night_number > until["night"]:
                     player["drunk"] = False
                     player["drunk_until"] = None
                     self.add_log(f"{player['name']} 的醉酒状态已结束", "status")
             
-            # 检查中毒状态是否过期（投毒者的毒在新的夜晚会被重新设置）
-            # 这里不清除，因为投毒者每晚重新选择目标
+            # 检查中毒状态是否过期（投毒者的毒在入夜时结束）
+            if player.get("poisoned") and player.get("poisoned_until"):
+                until = player["poisoned_until"]
+                if until.get("phase") == "night_start" and until.get("night") == self.night_number:
+                    player["poisoned"] = False
+                    player["poisoned_until"] = None
+                    self.add_log(f"{player['name']} 的中毒状态已结束", "status")
             
         self.add_log(f"第 {self.night_number} 个夜晚开始", "phase")
         
@@ -388,9 +406,9 @@ class Game:
         elif action_type == "poison" and target:
             if target_player:
                 target_player["poisoned"] = True
-                # 投毒持续到明天白天结束
-                target_player["poisoned_until"] = {"day": self.day_number + 1, "phase": "day_end"}
-                self.add_log(f"[夜间] {player['name']} 对 {target_player['name']} 下毒", "night")
+                # 投毒持续到第二天夜晚开始时（当晚和明天白天有效，再次入夜时结束）
+                target_player["poisoned_until"] = {"night": self.night_number + 1, "phase": "night_start"}
+                self.add_log(f"[夜间] {player['name']} 对 {target_player['name']} 下毒（持续到明晚入夜）", "night")
         
         # 处理普卡的特殊投毒（选择新目标中毒，前一晚目标死亡）
         elif action_type == "pukka_poison" and target:
@@ -519,14 +537,46 @@ class Game:
                     self.add_log(f"{target_player['name']} 是士兵，免疫了恶魔的击杀", "night")
                     continue
             
+            # 检查是否是镇长（可能由其他玩家替死）
+            # 这里记录镇长被攻击，具体替死处理由 process_mayor_death 完成
+            if target_player.get("role") and target_player["role"].get("id") == "mayor":
+                if not target_player.get("poisoned") and not target_player.get("drunk"):
+                    # 标记镇长被攻击，需要说书人处理
+                    actual_deaths.append({
+                        "player_id": target_id,
+                        "player_name": target_player["name"],
+                        "cause": "恶魔击杀",
+                        "mayor_targeted": True  # 标记镇长被攻击
+                    })
+                    continue
+            
             # 添加到死亡列表
             actual_deaths.append({
                 "player_id": target_id,
                 "player_name": target_player["name"],
                 "cause": "恶魔击杀"
             })
+            
+            # 检查是否是守鸦人（死亡时被唤醒）
+            if target_player.get("role") and target_player["role"].get("id") == "ravenkeeper":
+                if not target_player.get("poisoned") and not target_player.get("drunk"):
+                    target_player["ravenkeeper_triggered"] = True
+                    self.add_log(f"守鸦人 {target_player['name']} 在夜间死亡，需要唤醒选择一名玩家", "night")
         
         return actual_deaths
+    
+    def check_ravenkeeper_trigger(self):
+        """检查是否有守鸦人需要被唤醒"""
+        for death in getattr(self, 'demon_kills', []):
+            target_id = death.get("target_id")
+            target_player = next((p for p in self.players if p["id"] == target_id), None)
+            if target_player and target_player.get("ravenkeeper_triggered"):
+                return {
+                    "triggered": True,
+                    "player_id": target_id,
+                    "player_name": target_player["name"]
+                }
+        return {"triggered": False}
     
     def add_night_death(self, player_id, cause="恶魔击杀"):
         """添加夜间死亡"""
@@ -696,12 +746,25 @@ class Game:
             nomination["status"] = "executed"
             self.executions.append({
                 "day": self.day_number,
-                "player_id": nominee["id"],
-                "player_name": nominee["name"],
+                "executed_id": nominee["id"],
+                "executed_name": nominee["name"],
                 "vote_count": nomination["vote_count"],
                 "required_votes": required_votes
             })
             self.add_log(f"{nominee['name']} 被处决 (获得 {nomination['vote_count']}/{required_votes} 票)", "execution")
+            
+            # 检查圣徒能力：如果被处决的是圣徒，邪恶阵营获胜
+            nominee_role_id = nominee.get("role", {}).get("id") if nominee.get("role") else None
+            if nominee_role_id == "saint":
+                self.add_log(f"⚡ 圣徒 {nominee['name']} 被处决！邪恶阵营获胜！", "game_end")
+                return {
+                    "success": True, 
+                    "executed": True, 
+                    "player": nominee,
+                    "saint_executed": True,
+                    "game_end": {"ended": True, "winner": "evil", "reason": "圣徒被处决"}
+                }
+            
             return {"success": True, "executed": True, "player": nominee}
         else:
             nomination["status"] = "failed"
@@ -841,11 +904,25 @@ class Game:
     
     def _generate_investigator_info(self, player, is_drunk_or_poisoned=False):
         """生成调查员信息"""
-        minion_players = [p for p in self.players if p["role_type"] == "minion"]
-        if not minion_players:
-            return {"message": "场上没有爪牙", "is_drunk_or_poisoned": is_drunk_or_poisoned}
+        # 检查陌客（可能被当作爪牙）
+        recluse = next((p for p in self.players if p.get("role") and p["role"].get("id") == "recluse"), None)
         
-        target = random.choice(minion_players)
+        minion_players = [p for p in self.players if p["role_type"] == "minion"]
+        
+        # 如果有陌客，说书人可以选择让陌客被当作爪牙显示
+        if recluse and random.random() < 0.5:  # 50%几率陌客被当作爪牙
+            target = recluse
+            # 随机选择一个爪牙角色来显示
+            minion_roles = self.script["roles"].get("minion", [])
+            fake_minion_role = random.choice(minion_roles) if minion_roles else {"name": "爪牙"}
+            target_role_name = fake_minion_role["name"]
+            self.add_log(f"[系统提示] 陌客 {recluse['name']} 被调查员误认为 {target_role_name}", "info")
+        elif not minion_players:
+            return {"message": "场上没有爪牙", "is_drunk_or_poisoned": is_drunk_or_poisoned}
+        else:
+            target = random.choice(minion_players)
+            target_role_name = target["role"]["name"]
+        
         other_players = [p for p in self.players if p["id"] not in [player["id"], target["id"]]]
         decoy = random.choice(other_players) if other_players else None
         
@@ -857,8 +934,8 @@ class Game:
         return {
             "info_type": "investigator",
             "players": players_shown,
-            "role": target["role"]["name"],
-            "message": f"在 {' 和 '.join(players_shown)} 中，有一人是 {target['role']['name']}",
+            "role": target_role_name,
+            "message": f"在 {' 和 '.join(players_shown)} 中，有一人是 {target_role_name}",
             "is_drunk_or_poisoned": is_drunk_or_poisoned
         }
     
@@ -895,7 +972,12 @@ class Game:
             idx = (player_idx - offset) % len(self.players)
             neighbor = self.players[idx]
             if neighbor["alive"]:
-                if neighbor["role_type"] in ["minion", "demon"]:
+                # 陌客可能被识别为邪恶
+                if neighbor.get("role") and neighbor["role"].get("id") == "recluse":
+                    if random.random() < 0.5:  # 50%几率被当作邪恶
+                        evil_neighbors += 1
+                        self.add_log(f"[系统提示] 陌客 {neighbor['name']} 被共情者误认为邪恶", "info")
+                elif neighbor["role_type"] in ["minion", "demon"]:
                     evil_neighbors += 1
                 break
         
@@ -904,7 +986,12 @@ class Game:
             idx = (player_idx + offset) % len(self.players)
             neighbor = self.players[idx]
             if neighbor["alive"]:
-                if neighbor["role_type"] in ["minion", "demon"]:
+                # 陌客可能被识别为邪恶
+                if neighbor.get("role") and neighbor["role"].get("id") == "recluse":
+                    if random.random() < 0.5:  # 50%几率被当作邪恶
+                        evil_neighbors += 1
+                        self.add_log(f"[系统提示] 陌客 {neighbor['name']} 被共情者误认为邪恶", "info")
+                elif neighbor["role_type"] in ["minion", "demon"]:
                     evil_neighbors += 1
                 break
         
@@ -928,12 +1015,17 @@ class Game:
         has_demon = any(t["role_type"] == "demon" for t in target_players)
         
         # 注意：占卜师有一个"红鲱鱼"玩家，会被误判为恶魔
-        # 这里需要说书人在游戏设置时指定红鲱鱼
         red_herring_id = player.get("red_herring_id")
         if red_herring_id and any(t["id"] == red_herring_id for t in target_players):
             has_demon = True
         
-        result = "是" if has_demon else "否"
+        # 陌客可能被识别为恶魔
+        for t in target_players:
+            if t.get("role") and t["role"].get("id") == "recluse":
+                if random.random() < 0.5:  # 50%几率被当作恶魔
+                    has_demon = True
+                    self.add_log(f"[系统提示] 陌客 {t['name']} 被占卜师误认为恶魔", "info")
+        
         target_names = " 和 ".join([t["name"] for t in target_players])
         
         return {
@@ -1456,6 +1548,103 @@ def update_player_status(game_id):
         data.get('value')
     )
     
+    return jsonify(result)
+
+@app.route('/api/game/<game_id>/status', methods=['GET'])
+def get_game_status(game_id):
+    """获取游戏状态"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    return jsonify({
+        "phase": game.current_phase,
+        "day_number": game.day_number,
+        "night_number": game.night_number,
+        "demon_kills": getattr(game, 'demon_kills', []),
+        "protected_players": getattr(game, 'protected_players', []),
+        "night_deaths": getattr(game, 'night_deaths', [])
+    })
+
+@app.route('/api/game/<game_id>/set_red_herring', methods=['POST'])
+def set_red_herring(game_id):
+    """设置占卜师的红鲱鱼"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    data = request.json
+    game = games[game_id]
+    target_id = data.get('target_id')
+    
+    # 找到占卜师
+    fortune_teller = next((p for p in game.players if p.get("role") and p["role"].get("id") == "fortune_teller"), None)
+    if not fortune_teller:
+        return jsonify({"error": "场上没有占卜师"}), 400
+    
+    # 找到目标玩家
+    target = next((p for p in game.players if p["id"] == target_id), None)
+    if not target:
+        return jsonify({"error": "无效的目标玩家"}), 400
+    
+    # 检查目标是否是善良阵营
+    if target["role_type"] not in ["townsfolk", "outsider"]:
+        return jsonify({"error": "红鲱鱼必须是善良玩家"}), 400
+    
+    fortune_teller["red_herring_id"] = target_id
+    game.add_log(f"占卜师的红鲱鱼已设置为 {target['name']}", "setup")
+    
+    return jsonify({"success": True, "red_herring": target["name"]})
+
+@app.route('/api/game/<game_id>/mayor_substitute', methods=['POST'])
+def mayor_substitute(game_id):
+    """镇长替死处理"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    data = request.json
+    game = games[game_id]
+    substitute_id = data.get('substitute_id')  # 替死的玩家ID，如果为None则镇长自己死
+    
+    # 找到镇长
+    mayor = next((p for p in game.players if p.get("role") and p["role"].get("id") == "mayor"), None)
+    if not mayor:
+        return jsonify({"error": "场上没有镇长"}), 400
+    
+    if substitute_id:
+        substitute = next((p for p in game.players if p["id"] == substitute_id), None)
+        if not substitute:
+            return jsonify({"error": "无效的替死玩家"}), 400
+        
+        # 替死玩家死亡，镇长存活
+        # 更新夜间死亡列表
+        for death in game.night_deaths:
+            if death.get("mayor_targeted") and death["player_id"] == mayor["id"]:
+                death["player_id"] = substitute_id
+                death["player_name"] = substitute["name"]
+                death["cause"] = "镇长替死"
+                death.pop("mayor_targeted", None)
+                break
+        
+        game.add_log(f"镇长 {mayor['name']} 的能力触发，{substitute['name']} 替镇长死亡", "night")
+        return jsonify({"success": True, "substitute": substitute["name"]})
+    else:
+        # 镇长自己死亡
+        for death in game.night_deaths:
+            if death.get("mayor_targeted"):
+                death.pop("mayor_targeted", None)
+                break
+        
+        game.add_log(f"镇长 {mayor['name']} 选择不使用替死能力", "night")
+        return jsonify({"success": True, "substitute": None})
+
+@app.route('/api/game/<game_id>/check_ravenkeeper', methods=['GET'])
+def check_ravenkeeper(game_id):
+    """检查守鸦人是否被触发"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    result = game.check_ravenkeeper_trigger()
     return jsonify(result)
 
 @app.route('/api/game/<game_id>/generate_info', methods=['POST'])

@@ -1345,6 +1345,20 @@ body {
     background: rgba(212, 175, 55, 0.9);
 }
 
+.status-icon.red-herring-icon {
+    background: rgba(255, 99, 71, 0.9);
+}
+
+.status-icon.ravenkeeper-icon {
+    background: rgba(70, 70, 70, 0.9);
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 /* The Drunk (酒鬼) indicator */
 .player-seat.is-the-drunk .seat-content {
     border-color: var(--color-outsider);
