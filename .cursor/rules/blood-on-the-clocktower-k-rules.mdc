@@ -1,0 +1,102 @@
+---
+description: [blood_on_the_clocktower_K] 核心控制规则与上下文索引
+globs: **/*
+alwaysApply: true
+---
+
+# 🧭 [blood_on_the_clocktower_K] Core Control Rules
+
+## 1. 项目基础元数据 (Project Metadata)
+
+### 基础信息
+
+- **项目名称**：blood_on_the_clocktower_K
+- **核心目标**：构建一个《血染钟楼》（Blood on the Clocktower）桌面游戏的**说书人（Storyteller）辅助系统**。
+- **技术栈**：Python 3.x, Flask, HTML5, CSS3, Vanilla JS (ES6+)
+- **当前日期**：{{ date }} (AI 自动引用)
+
+## 2. 上下文与记忆索引 (Context & Memory)
+
+### 核心指令
+>
+> 🛑 **行动前必读**：开始任何代码编写前，必须先阅读以下路径中的最新进度文档。
+
+### 目录结构
+
+- **文档根目录**：`blood_on_the_clocktower_K_docs_temp_scripts/`
+- **详细逻辑参考**：`blood_on_the_clocktower_K_docs_temp_scripts/` (包含最新的逻辑推演与汇总)
+- **每日进度日志**：`blood_on_the_clocktower_K_docs_temp_scripts/daily_logs/`
+  - 格式：`YYYY.MM.DD_summary.md`
+  - 作用：记录当天的思考、决策、变更内容及待办事项。
+- **全局进度总览**：`blood_on_the_clocktower_K_docs_temp_scripts/2025.12.23_Initial_Access_Summary_and_Overview.md` (或 `Project_Status.md`)
+  - 作用：记录项目里程碑、当前阶段及整体架构变更。
+
+## 3. 开发工作流规范 (Workflow Standards)
+
+### 3.1 启动阶段 (Initialization)
+
+1. **读取状态**：检索 `blood_on_the_clocktower_K_docs_temp_scripts` 或 `docs` 目录下最新的 `*.md` 文件，理解上一次中断时的上下文。
+2. **确认任务**：复述用户需求，并结合过往进度确认本次开发的切入点。
+
+### 3.2 执行阶段 (Execution)
+
+- **代码与工程规则**：严格遵守 Workspace 根目录下的《总纲》。
+- **关键红线**：
+  - ❌ 禁止 `rm` / 删除核心文档。
+  - ✅ 涉及路径操作先遍历 (`ls -R` 或 `find`)。
+  - ✅ 破坏性操作先干跑 (`--dry-run`)。
+- **业务逻辑红线 (Business Logic Priority)**：
+  - **状态优先级**：Dead > Drunk/Poisoned > Ability (Assassin > Monk)。
+  - **信息生成**：必须先检查 `is_poisoned` 或 `is_drunk`，若为真则**必须**生成错误或误导信息。
+  - **死亡结算**：击杀前必须按顺序检查所有保护机制 (Innkeeper -> Tea Lady -> Pacifist -> Sailor -> Monk)。
+- **临时脚本**：所有一次性、测试性脚本放入 `temp_scripts/` 目录，并加入 `.gitignore`。
+
+### 3.3 结束阶段 (Finalization)
+
+- **必须动作**：在结束对话或完成功能点时，**必须**生成或更新当日日志。
+- **日志模板**：
+
+  ```markdown
+  ## [时间戳] 变更摘要
+  - ✅ 完成：[具体功能点]
+  - 📝 变更：[修改的文件及原因]
+  - 🚧 待办：[下一步计划]
+  - 💡 思考：[遇到的坑或架构决策]
+  ```
+
+## 4. 行为奖惩机制 (Behavioral Reinforcement)
+
+### 🌟 奖励行为 (+1000 Credit)
+
+- 主动检索并引用历史日志，避免重复造轮子。
+- 修改文档时采用**追加（Append）**而非**覆盖（Overwrite）**模式。
+- 在代码关键逻辑处自动添加符合 Javadoc/DocString 规范的注释。
+- 发现潜在 Bug 或逻辑漏洞并主动提出修复方案。
+
+### 💥 惩罚行为 (-1000 Credit)
+
+- ❌ **重罪**：直接覆盖或删除 `.md` 历史记录导致进度丢失。
+- ❌ **安全违规**：在代码中硬编码密钥、Token 或提交 `.env` 文件。
+- **偷懒**：修改了代码逻辑但未同步更新对应的文档或注释。
+- **盲目**：未检查文件是否存在直接进行读取或写入操作。
+
+## 5. 特定文件与配置 (Specific Configuration)
+
+### 工程配置
+
+- **忽略规则**：确保 `.gitignore` 包含 `__pycache__`, `.env`, `*.log`, `temp_scripts/`, `blood_on_the_clocktower_K_docs_temp_scripts/`。
+- **Git 提交规范**：
+  - 格式：`type(scope): subject`
+  - 示例：`feat(auth): 增加JWT登录校验机制`
+  - 乱码处理：`git config --global i18n.commitEncoding utf-8`
+- **待补全文件**：
+  - `requirements.txt` (需包含 Flask 等依赖)
+  - `README.md` (项目启动说明)
+
+### Markdown 规范
+
+- **核心原则**：文档撰写需符合根目录 `.markdownlint.json` 定义的标准。
+- **重点摘要**：
+  - 保持标题层级结构 (H1->H2->H3)，第四层级起使用列表项。
+  - 代码块必须声明语言（如 ```python）。
+  - 禁止使用纯加粗文本代替标题。
