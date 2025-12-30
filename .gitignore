@@ -2,4 +2,7 @@ blood_on_the_clocktower_K_docs_temp_scripts/
 __pycache__/  
 *.pyc  
 .env  
-venv/ 
+venv/
+
+# Cursor IDE 配置 (IDE-specific, not needed for other developers)
+.cursor/
