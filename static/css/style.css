@@ -299,6 +299,7 @@ body {
 .player-slider {
     flex: 1;
     -webkit-appearance: none;
+    appearance: none;
     height: 8px;
     background: var(--bg-card-hover);
     border-radius: var(--radius-xl);
@@ -502,6 +503,16 @@ body {
     .game-layout {
         grid-template-columns: 1fr;
     }
+    
+    .table-section {
+        padding: 40px;
+    }
+    
+    .table-container {
+        /* 单列布局时，圆桌根据屏幕宽度和高度自适应 */
+        width: min(450px, calc(100vw - 120px), calc(100vh - 300px));
+        height: min(450px, calc(100vw - 120px), calc(100vh - 300px));
+    }
 }
 
 /* Table Section */
@@ -509,24 +520,34 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+    width: 100%;
+    min-height: 400px;
+    box-sizing: border-box;
 }
 
 .table-container {
     position: relative;
-    width: 600px;
-    height: 600px;
+    /* 固定尺寸，玩家座位在内部通过百分比定位 */
+    --table-size: min(500px, calc(100vw - 40px), calc(100vh - 280px));
+    width: var(--table-size);
+    height: var(--table-size);
+    min-width: 200px;
+    min-height: 200px;
+    flex-shrink: 0;
 }
 
 .player-circle {
     position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
 }
 
 .player-seat {
     position: absolute;
-    width: 80px;
-    height: 80px;
+    width: 70px;
+    height: 70px;
     transform: translate(-50%, -50%);
     cursor: pointer;
     transition: all var(--transition-normal);
@@ -1430,42 +1451,685 @@ body {
 }
 
 /* ===== Responsive ===== */
+
+/* ----- 平板竖屏 (768px - 1024px) ----- */
+@media (max-width: 1024px) {
+    .main-content {
+        padding: var(--spacing-lg);
+    }
+    
+    .panel-body {
+        padding: var(--spacing-lg);
+    }
+    
+    /* 设置面板优化 */
+    .script-grid {
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: var(--spacing-md);
+    }
+    
+    .player-input-grid {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    }
+    
+    /* 控制面板优化 */
+    .control-card {
+        padding: var(--spacing-md);
+    }
+    
+    .phase-controls {
+        flex-wrap: wrap;
+    }
+    
+    .phase-controls .btn {
+        min-width: 140px;
+    }
+}
+
+/* ----- 大手机 / 平板横屏 (max-width: 768px) ----- */
 @media (max-width: 768px) {
+    html {
+        font-size: 15px;
+    }
+    
+    .header {
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+    
     .header-content {
         flex-direction: column;
-        gap: var(--spacing-md);
+        gap: var(--spacing-sm);
     }
     
     .logo {
         flex-wrap: wrap;
         justify-content: center;
+        gap: var(--spacing-sm);
+    }
+    
+    .logo h1 {
+        font-size: 1.4rem;
+    }
+    
+    .logo .subtitle {
+        font-size: 0.8rem;
+        border-left: none;
+        padding-left: 0;
+    }
+    
+    .game-info {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: var(--spacing-sm);
+    }
+    
+    .main-content {
+        padding: var(--spacing-md);
+    }
+    
+    .panel-header h2 {
+        font-size: 1.2rem;
+        letter-spacing: 1px;
+    }
+    
+    .panel-body {
+        padding: var(--spacing-md);
+    }
+    
+    /* 剧本选择 */
+    .script-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-md);
+    }
+    
+    .script-card {
+        padding: var(--spacing-md);
+    }
+    
+    .script-name-zh {
+        font-size: 1.1rem;
+    }
+    
+    /* 玩家数量滑块 */
+    .player-count-wrapper {
+        flex-direction: column;
+        gap: var(--spacing-md);
+    }
+    
+    .player-slider {
+        width: 100%;
+    }
+    
+    /* 角色分布 */
+    .role-distribution {
+        gap: var(--spacing-md);
+        padding: var(--spacing-sm);
+    }
+    
+    .role-dist-count {
+        font-size: 1.5rem;
+    }
+    
+    .role-dist-label {
+        font-size: 0.75rem;
+    }
+    
+    /* 玩家输入 */
+    .player-input-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+    }
+    
+    .player-input-item input {
+        padding: var(--spacing-sm);
+        font-size: 0.9rem;
+    }
+    
+    /* 角色分配按钮 */
+    .assignment-options {
+        flex-direction: column;
+        gap: var(--spacing-md);
+    }
+    
+    .assignment-options .btn {
+        width: 100%;
+        padding: var(--spacing-md);
+    }
+    
+    /* 游戏圆桌 - 动态适应屏幕 */
+    .table-section {
+        padding: 35px;
     }
     
     .table-container {
-        width: 350px;
-        height: 350px;
+        width: min(300px, calc(100vw - 100px), calc(100vh - 320px));
+        height: min(300px, calc(100vw - 100px), calc(100vh - 320px));
     }
     
     .player-seat {
-        width: 50px;
-        height: 50px;
+        width: clamp(38px, 10vw, 50px);
+        height: clamp(38px, 10vw, 50px);
     }
     
-    .seat-name, .seat-role {
-        font-size: 0.6rem;
+    .seat-content {
+        border-width: 2px;
+    }
+    
+    .seat-name {
+        font-size: 0.65rem;
+        max-width: 45px;
+    }
+    
+    .seat-role {
+        font-size: 0.55rem;
+        max-width: 45px;
+    }
+    
+    .seat-number {
+        font-size: 0.65rem;
     }
     
     .day-night-indicator {
         width: 80px;
         height: 80px;
+        padding: var(--spacing-sm);
     }
     
     .indicator-icon {
         font-size: 1.5rem;
     }
     
+    .indicator-text {
+        font-size: 0.75rem;
+    }
+    
+    /* 控制面板 */
+    .control-section {
+        gap: var(--spacing-sm);
+    }
+    
+    .control-card h3 {
+        font-size: 0.9rem;
+        margin-bottom: var(--spacing-sm);
+    }
+    
+    .phase-controls {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+    
+    .phase-controls .btn {
+        width: 100%;
+    }
+    
+    /* 夜间行动列表 */
+    .night-order-list {
+        max-height: 250px;
+    }
+    
+    .night-order-item {
+        padding: var(--spacing-sm);
+        gap: var(--spacing-sm);
+    }
+    
+    .night-order-number {
+        width: 22px;
+        height: 22px;
+        font-size: 0.7rem;
+    }
+    
+    .night-order-name {
+        font-size: 0.85rem;
+    }
+    
+    .night-order-role {
+        font-size: 0.7rem;
+    }
+    
+    /* 提名表单 */
+    .nomination-form {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+    
+    .nomination-form .form-select {
+        width: 100%;
+    }
+    
+    .nomination-arrow {
+        transform: rotate(90deg);
+    }
+    
+    .nomination-form .btn {
+        width: 100%;
+    }
+    
+    /* 游戏日志 */
+    .game-log {
+        max-height: 200px;
+    }
+    
+    .log-entry {
+        font-size: 0.75rem;
+    }
+    
+    /* 弹窗 */
+    .modal {
+        padding: var(--spacing-sm);
+        align-items: flex-start;
+        padding-top: 5vh;
+    }
+    
     .modal-content {
-        margin: var(--spacing-md);
+        max-height: 85vh;
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        border-radius: var(--radius-md);
+    }
+    
+    .modal-header {
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+    
+    .modal-header h3 {
+        font-size: 1rem;
+    }
+    
+    .modal-body {
+        padding: var(--spacing-md);
+    }
+    
+    .modal-footer {
+        padding: var(--spacing-sm) var(--spacing-md);
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+    }
+    
+    .modal-footer .btn {
+        flex: 1;
+        min-width: 100px;
+    }
+    
+    /* 手动分配表格 */
+    .manual-assign-row {
+        grid-template-columns: 30px 1fr;
+        gap: var(--spacing-sm);
+    }
+    
+    .manual-assign-row .role-select {
+        grid-column: 1 / -1;
+    }
+    
+    /* 投票网格 */
+    .vote-grid {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    }
+    
+    .vote-player {
+        padding: var(--spacing-sm);
+    }
+    
+    .vote-player-name {
+        font-size: 0.8rem;
+    }
+    
+    .vote-btn {
+        width: 32px;
+        height: 32px;
+    }
+    
+    /* 玩家详情 */
+    .player-detail-avatar {
+        width: 80px;
+        height: 80px;
+        font-size: 2rem;
+    }
+    
+    .player-detail-role {
+        font-size: 1.1rem;
+    }
+    
+    .player-status-controls {
+        gap: var(--spacing-sm);
+    }
+    
+    .status-toggle {
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 0.85rem;
+    }
+    
+    /* 页脚 */
+    .footer {
+        padding: var(--spacing-md);
+        font-size: 0.75rem;
+    }
+}
+
+/* ----- 小手机 (max-width: 480px) ----- */
+@media (max-width: 480px) {
+    html {
+        font-size: 14px;
+    }
+    
+    .logo h1 {
+        font-size: 1.2rem;
+    }
+    
+    .logo-icon {
+        font-size: 1.5rem;
+    }
+    
+    /* 设置面板 */
+    .setup-section h3 {
+        font-size: 1rem;
+    }
+    
+    .script-name-zh {
+        font-size: 1rem;
+    }
+    
+    .script-name-en {
+        font-size: 0.8rem;
+    }
+    
+    /* 玩家输入改为单列 */
+    .player-input-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    /* 角色分布改为两行 */
+    .role-distribution {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+    }
+    
+    .role-dist-count {
+        font-size: 1.3rem;
+    }
+    
+    /* 游戏圆桌 - 适应小屏 */
+    .table-section {
+        padding: 0;
+    }
+    
+    .table-section {
+        padding: 30px;
+    }
+    
+    .table-container {
+        width: min(260px, calc(100vw - 80px), calc(100vh - 340px));
+        height: min(260px, calc(100vw - 80px), calc(100vh - 340px));
+    }
+    
+    .player-seat {
+        width: clamp(32px, 9vw, 42px);
+        height: clamp(32px, 9vw, 42px);
+    }
+    
+    .seat-name {
+        font-size: 0.5rem;
+        max-width: 34px;
+    }
+    
+    .seat-role {
+        font-size: 0.45rem;
+        max-width: 34px;
+    }
+    
+    .day-night-indicator {
+        width: 65px;
+        height: 65px;
+    }
+    
+    .indicator-icon {
+        font-size: 1.2rem;
+    }
+    
+    .indicator-text {
+        font-size: 0.65rem;
+    }
+    
+    /* 状态图标 */
+    .status-icons {
+        bottom: -6px;
+        right: -6px;
+    }
+    
+    .status-icon {
+        width: 14px;
+        height: 14px;
+        font-size: 0.65rem;
+    }
+    
+    .left-icons {
+        bottom: -6px;
+        left: -6px;
+    }
+    
+    .left-icon {
+        width: 14px;
+        height: 14px;
+        font-size: 0.55rem;
+    }
+    
+    /* 按钮优化 */
+    .btn {
+        padding: var(--spacing-sm) var(--spacing-md);
+        font-size: 0.9rem;
+    }
+    
+    /* 夜间行动面板 */
+    .night-action-panel {
+        padding: var(--spacing-md);
+    }
+    
+    .night-action-panel h5 {
+        font-size: 1rem;
+    }
+    
+    /* 弹窗全屏化 */
+    .modal {
+        padding: 0;
+        padding-top: 0;
+        align-items: stretch;
+    }
+    
+    .modal-content {
+        max-height: 100vh;
+        border-radius: 0;
+        height: 100%;
+    }
+    
+    /* 投票网格 */
+    .vote-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    
+    .vote-info {
+        padding: var(--spacing-sm);
+        font-size: 0.9rem;
+    }
+    
+    /* 游戏日志 */
+    .game-log {
+        max-height: 150px;
+    }
+}
+
+/* ----- 超小屏幕 (max-width: 360px) ----- */
+@media (max-width: 360px) {
+    html {
+        font-size: 13px;
+    }
+    
+    .header {
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+    
+    .main-content {
+        padding: var(--spacing-sm);
+    }
+    
+    .table-section {
+        padding: 25px;
+    }
+    
+    .table-container {
+        width: min(220px, calc(100vw - 70px), calc(100vh - 300px));
+        height: min(220px, calc(100vw - 70px), calc(100vh - 300px));
+    }
+    
+    .player-seat {
+        width: clamp(28px, 8vw, 36px);
+        height: clamp(28px, 8vw, 36px);
+    }
+    
+    .seat-name, .seat-role {
+        display: none; /* 极小屏幕隐藏文字，只显示座位号 */
+    }
+    
+    .seat-number {
+        position: relative;
+        top: auto;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    
+    .day-night-indicator {
+        width: 55px;
+        height: 55px;
+    }
+    
+    .indicator-icon {
+        font-size: 1rem;
+    }
+    
+    .indicator-text {
+        font-size: 0.6rem;
+    }
+    
+    .role-distribution {
+        grid-template-columns: repeat(4, 1fr);
+    }
+    
+    .role-dist-item {
+        padding: var(--spacing-xs);
+    }
+    
+    .role-dist-count {
+        font-size: 1.1rem;
+    }
+    
+    .role-dist-label {
+        font-size: 0.65rem;
+    }
+}
+
+/* ----- 触摸设备优化 ----- */
+@media (hover: none) and (pointer: coarse) {
+    /* 增大触摸目标 */
+    .btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+    
+    .player-seat {
+        /* 增加可点击区域 */
+        padding: 4px;
+    }
+    
+    .player-seat:hover {
+        /* 触摸设备上禁用 hover 缩放效果 */
+        transform: translate(-50%, -50%);
+    }
+    
+    .player-seat:active {
+        transform: translate(-50%, -50%) scale(0.95);
+    }
+    
+    .vote-btn {
+        min-width: 40px;
+        min-height: 40px;
+    }
+    
+    .form-select {
+        min-height: 44px;
+        font-size: 16px; /* 防止 iOS 自动缩放 */
+    }
+    
+    .player-input-item input {
+        min-height: 44px;
+        font-size: 16px; /* 防止 iOS 自动缩放 */
+    }
+    
+    .night-order-item {
+        min-height: 48px;
+    }
+    
+    .status-toggle {
+        min-height: 44px;
+    }
+    
+    .modal-close {
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    /* 滚动优化 */
+    .night-order-list,
+    .nominations-list,
+    .game-log,
+    .modal-body {
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* ----- 横屏模式优化 ----- */
+@media (max-height: 500px) and (orientation: landscape) {
+    .header {
+        padding: var(--spacing-xs) var(--spacing-md);
+    }
+    
+    .header-content {
+        flex-direction: row;
+    }
+    
+    .game-layout {
+        grid-template-columns: 1fr 300px;
+    }
+    
+    .table-section {
+        padding: 25px;
+    }
+    
+    .table-container {
+        /* 横屏模式：优先使用视口高度 */
+        width: min(220px, calc(100vh - 100px), calc(100vw - 380px));
+        height: min(220px, calc(100vh - 100px), calc(100vw - 380px));
+    }
+    
+    .player-seat {
+        width: clamp(28px, 5vh, 36px);
+        height: clamp(28px, 5vh, 36px);
+    }
+    
+    .day-night-indicator {
+        width: 60px;
+        height: 60px;
+    }
+    
+    .modal {
+        padding: var(--spacing-sm);
+    }
+    
+    .modal-content {
+        max-height: 90vh;
     }
 }
 

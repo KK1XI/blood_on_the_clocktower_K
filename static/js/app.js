@@ -392,14 +392,14 @@ function renderPlayerCircle() {
     const circle = document.getElementById('playerCircle');
     circle.innerHTML = '';
     
-    const centerX = 300;
-    const centerY = 300;
-    const radius = 240;
+    // 使用百分比定位，座位会自动随容器尺寸缩放
+    const centerPercent = 50; // 中心点 50%
+    const radiusPercent = 42; // 半径 42%（预留座位空间）
     
     gameState.players.forEach((player, index) => {
         const angle = (index / gameState.players.length) * 2 * Math.PI - Math.PI / 2;
-        const x = centerX + radius * Math.cos(angle);
-        const y = centerY + radius * Math.sin(angle);
+        const xPercent = centerPercent + radiusPercent * Math.cos(angle);
+        const yPercent = centerPercent + radiusPercent * Math.sin(angle);
         
         const roleClass = player.role_type || '';
         const statusClasses = [];
@@ -428,7 +428,7 @@ function renderPlayerCircle() {
         
         circle.innerHTML += `
             <div class="player-seat ${statusClasses.join(' ')}" 
-                 style="left: ${x}px; top: ${y}px;"
+                 style="left: ${xPercent}%; top: ${yPercent}%;"
                  data-player-id="${player.id}"
                  onclick="openPlayerDetail(${player.id})">
                 <div class="seat-content">
