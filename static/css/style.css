@@ -494,9 +494,23 @@ body {
 /* ===== Game Panel ===== */
 .game-layout {
     display: grid;
-    grid-template-columns: 1fr 400px;
+    grid-template-columns: 1fr min(400px, 30%);
     gap: var(--spacing-xl);
     min-height: 70vh;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 确保控制面板不会超出容器 */
+.control-section {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 1400px) {
+    .game-layout {
+        grid-template-columns: 1fr min(350px, 35%);
+    }
 }
 
 @media (max-width: 1200px) {
@@ -528,12 +542,15 @@ body {
 .table-container {
     position: relative;
     /* 固定尺寸，玩家座位在内部通过百分比定位 */
+    /* JavaScript 会动态设置 width 和 height，这里作为默认值 */
     --table-size: min(500px, calc(100vw - 40px), calc(100vh - 280px));
     width: var(--table-size);
     height: var(--table-size);
     min-width: 200px;
     min-height: 200px;
     flex-shrink: 0;
+    /* 确保 JavaScript 设置的 inline style 优先级更高 */
+    box-sizing: border-box;
 }
 
 .player-circle {
@@ -546,15 +563,36 @@ body {
 
 .player-seat {
     position: absolute;
-    width: 70px;
-    height: 70px;
+    /* 使用 CSS 变量动态设置座位大小，默认 70px */
+    width: var(--seat-size, 70px);
+    height: var(--seat-size, 70px);
     transform: translate(-50%, -50%);
     cursor: pointer;
     transition: all var(--transition-normal);
+    z-index: 1; /* 确保座位可以接收点击事件 */
+    /* 确保座位内容可以点击 */
+    pointer-events: auto !important;
+    /* 按钮样式重置 */
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-align: inherit;
+    outline: none; /* 移除焦点轮廓（可选，如果需要可添加自定义焦点样式） */
+    /* 确保按钮可以接收所有鼠标事件 */
+    -webkit-tap-highlight-color: transparent;
+}
+
+.player-seat:focus {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
 }
 
 .player-seat:hover {
-    transform: translate(-50%, -50%) scale(1.1);
+    /* 恢复轻微的 scale 效果，提供视觉反馈 */
+    transform: translate(-50%, -50%) scale(1.05);
     z-index: 10;
 }
 
@@ -570,6 +608,10 @@ body {
     border: 3px solid var(--color-alive);
     box-shadow: var(--shadow-md);
     transition: all var(--transition-normal);
+    position: relative;
+    z-index: 2; /* 确保内容在 tooltip 之上（虽然 tooltip 有 pointer-events: none） */
+    /* 确保内容可以接收所有鼠标事件 */
+    touch-action: manipulation;
 }
 
 .player-seat.dead .seat-content {
@@ -631,37 +673,143 @@ body {
 .seat-role.minion { color: var(--color-minion); }
 .seat-role.demon { color: var(--color-demon); }
 
+/* ===== Seat Tooltip ===== */
+.seat-tooltip {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%) translateY(-4px);
+    bottom: calc(100% + 8px);
+    background: rgba(20, 20, 20, 0.98);
+    color: var(--text-primary);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(139, 0, 0, 0.5);
+    white-space: nowrap;
+    z-index: 1001; /* 在座位之上，但确保不阻挡点击 */
+    pointer-events: none !important; /* 关键：强制不拦截鼠标事件，让点击穿透到座位 */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease;
+    min-width: 100px;
+    text-align: center;
+    /* 确保 tooltip 不会被裁剪 */
+    will-change: transform, opacity;
+    /* 确保 tooltip 不会阻挡任何交互 */
+    touch-action: none;
+}
+
+.seat-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(20, 20, 20, 0.98);
+}
+
+.tooltip-name {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+    display: block; /* 确保显示 */
+    white-space: nowrap; /* 防止换行 */
+}
+
+.tooltip-role {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    display: block; /* 确保显示 */
+    white-space: nowrap; /* 防止换行 */
+}
+
+.tooltip-role.townsfolk { color: var(--color-townsfolk); }
+.tooltip-role.outsider { color: var(--color-outsider); }
+.tooltip-role.minion { color: var(--color-minion); }
+.tooltip-role.demon { color: var(--color-demon); }
+
+/* Tooltip 显示状态（由 JavaScript 控制） */
+.player-seat.tooltip-visible .seat-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+    /* 确保 tooltip 显示时仍然不阻挡点击 */
+    pointer-events: none !important;
+}
+
+/* hover 时提高层级，确保 tooltip 显示 */
+.player-seat:hover {
+    z-index: 10; /* hover 时提高层级，但 tooltip 在上面 */
+}
+
+/* 确保 seat-content 始终可以点击，即使在 tooltip 显示时 */
+.seat-content {
+    pointer-events: auto !important; /* 强制允许点击 */
+    position: relative;
+    z-index: 2; /* 确保内容在 tooltip 之上（虽然 tooltip 有 pointer-events: none） */
+}
+
+/* 触摸设备：点击时显示 tooltip */
+@media (hover: none) and (pointer: coarse) {
+    .player-seat.has-tooltip:active .seat-tooltip,
+    .player-seat.has-tooltip.tooltip-active .seat-tooltip {
+        opacity: 1;
+        visibility: visible;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
 .table-center {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
     text-align: center;
+    /* 确保容器有明确的尺寸，用于子元素的百分比计算 */
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .day-night-indicator {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-lg);
+    gap: clamp(4px, 1.5vw, var(--spacing-sm));
+    padding: clamp(8px, 2vw, var(--spacing-lg));
     background: var(--bg-card);
     border-radius: 50%;
-    width: 120px;
-    height: 120px;
+    /* 响应式尺寸：使用 aspect-ratio 确保始终是正圆 */
+    aspect-ratio: 1; /* 强制 1:1 比例，确保是正圆 */
+    /* 使用相对于 table-center 的尺寸（table-center 现在是 100% x 100%） */
+    width: min(120px, 20%); /* 相对于 table-center（100% x 100%）的 20% */
+    height: auto; /* 通过 aspect-ratio 自动保持与宽度相等 */
+    min-width: 55px; /* 最小尺寸，确保在小屏幕上仍可读 */
+    min-height: 55px; /* 备用最小高度（如果 aspect-ratio 不支持） */
     justify-content: center;
     box-shadow: var(--shadow-lg);
     border: 2px solid var(--color-blood);
+    box-sizing: border-box; /* 确保 border 包含在尺寸内 */
+    /* table-center 使用 flex 居中，所以这里不需要额外定位 */
 }
 
 .indicator-icon {
-    font-size: 2.5rem;
+    font-size: clamp(1rem, 4vw, 2.5rem); /* 响应式图标大小 */
+    line-height: 1;
 }
 
 .indicator-text {
-    font-size: 0.9rem;
+    font-size: clamp(0.6rem, 1.5vw, 0.9rem); /* 响应式文字大小 */
     font-weight: 600;
     color: var(--text-primary);
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
 }
 
 /* Control Section */
@@ -669,6 +817,9 @@ body {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
+    min-width: 0; /* 允许 flex 子元素缩小 */
+    max-width: 100%; /* 确保不超过父容器 */
+    box-sizing: border-box; /* 包含 padding 和 border 在内计算宽度 */
 }
 
 .control-card {
@@ -676,6 +827,10 @@ body {
     border-radius: var(--radius-md);
     padding: var(--spacing-md);
     border: 1px solid rgba(139, 0, 0, 0.2);
+    min-width: 0; /* 允许缩小 */
+    max-width: 100%; /* 确保不超过父容器 */
+    box-sizing: border-box; /* 包含 padding 和 border 在内计算宽度 */
+    overflow-x: auto; /* 允许横向滚动（作为后备方案） */
 }
 
 .control-card h3 {
@@ -689,10 +844,16 @@ body {
 .phase-controls {
     display: flex;
     gap: var(--spacing-md);
+    min-width: 0; /* 允许缩小 */
+    flex-wrap: wrap; /* 允许换行 */
 }
 
 .phase-controls .btn {
     flex: 1;
+    min-width: 0; /* 允许按钮缩小 */
+    white-space: nowrap; /* 防止文字换行（保持按钮紧凑） */
+    overflow: hidden; /* 隐藏溢出内容 */
+    text-overflow: ellipsis; /* 显示省略号 */
 }
 
 /* Night Order List */
@@ -1462,6 +1623,11 @@ body {
         padding: var(--spacing-lg);
     }
     
+    /* 游戏布局优化 */
+    .game-layout {
+        gap: var(--spacing-md); /* 减小 gap 以节省空间 */
+    }
+    
     /* 设置面板优化 */
     .script-grid {
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1482,7 +1648,8 @@ body {
     }
     
     .phase-controls .btn {
-        min-width: 140px;
+        min-width: 0; /* 移除固定最小宽度，允许按钮自适应 */
+        flex: 1 1 auto; /* 允许缩小但保持弹性 */
     }
 }
 
@@ -1607,40 +1774,48 @@ body {
     }
     
     .player-seat {
-        width: clamp(38px, 10vw, 50px);
-        height: clamp(38px, 10vw, 50px);
+        /* 使用 CSS 变量，但保留最小值限制 */
+        width: max(var(--seat-size, clamp(38px, 10vw, 50px)), clamp(38px, 10vw, 50px));
+        height: max(var(--seat-size, clamp(38px, 10vw, 50px)), clamp(38px, 10vw, 50px));
     }
     
     .seat-content {
         border-width: 2px;
+        padding: 2px; /* 减小内边距，为文字留出更多空间 */
     }
     
     .seat-name {
-        font-size: 0.65rem;
-        max-width: 45px;
+        font-size: clamp(0.5rem, 1.2vw, 0.65rem); /* 使用 clamp 确保字体随容器缩放 */
+        max-width: calc(100% - 4px); /* 确保不超过容器，留出边距 */
+        line-height: 1.1; /* 减小行高，节省空间 */
+        padding: 0 2px; /* 添加小内边距 */
     }
     
     .seat-role {
-        font-size: 0.55rem;
-        max-width: 45px;
+        font-size: clamp(0.45rem, 1vw, 0.55rem); /* 使用 clamp 确保字体随容器缩放 */
+        max-width: calc(100% - 4px); /* 确保不超过容器，留出边距 */
+        line-height: 1.1; /* 减小行高，节省空间 */
+        padding: 0 2px; /* 添加小内边距 */
     }
     
     .seat-number {
-        font-size: 0.65rem;
+        font-size: clamp(0.55rem, 1vw, 0.65rem);
     }
     
     .day-night-indicator {
-        width: 80px;
-        height: 80px;
-        padding: var(--spacing-sm);
+        width: min(80px, 22%);
+        height: min(80px, 22%);
+        padding: clamp(6px, 1.5vw, var(--spacing-sm));
+        min-width: 60px;
+        min-height: 60px;
     }
     
     .indicator-icon {
-        font-size: 1.5rem;
+        font-size: clamp(1.2rem, 3vw, 1.5rem);
     }
     
     .indicator-text {
-        font-size: 0.75rem;
+        font-size: clamp(0.7rem, 1.2vw, 0.75rem);
     }
     
     /* 控制面板 */
@@ -1864,31 +2039,97 @@ body {
     }
     
     .player-seat {
-        width: clamp(32px, 9vw, 42px);
-        height: clamp(32px, 9vw, 42px);
+        /* 使用 CSS 变量，但保留最小值限制 */
+        width: max(var(--seat-size, clamp(32px, 9vw, 42px)), clamp(32px, 9vw, 42px));
+        height: max(var(--seat-size, clamp(32px, 9vw, 42px)), clamp(32px, 9vw, 42px));
+    }
+    
+    /* 小屏幕：将文字移到圆圈外 */
+    .seat-content {
+        border-width: 2px;
+        padding: 2px;
+        /* 确保圆圈内只显示座位号，文字移到外部 */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    /* 圆圈内只显示座位号 */
+    .seat-name,
+    .seat-role {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        background: rgba(20, 20, 20, 0.95);
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+        font-size: 0.65rem;
+        z-index: 5;
+        pointer-events: none;
+        max-width: 90px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        border: 1px solid rgba(139, 0, 0, 0.3);
+    }
+    
+    /* 上半圆：标签在下方 */
+    .player-seat.label-top .seat-name {
+        top: calc(100% + 4px);
+    }
+    
+    .player-seat.label-top .seat-role {
+        top: calc(100% + 20px);
+    }
+    
+    /* 下半圆：标签在上方 */
+    .player-seat.label-bottom .seat-name {
+        bottom: calc(100% + 4px);
+    }
+    
+    .player-seat.label-bottom .seat-role {
+        bottom: calc(100% + 20px);
     }
     
     .seat-name {
-        font-size: 0.5rem;
-        max-width: 34px;
+        font-weight: 600;
+        color: var(--text-primary);
     }
     
     .seat-role {
-        font-size: 0.45rem;
-        max-width: 34px;
+        color: var(--text-secondary);
+        font-size: 0.6rem;
+    }
+    
+    .seat-role.townsfolk { color: var(--color-townsfolk); }
+    .seat-role.outsider { color: var(--color-outsider); }
+    .seat-role.minion { color: var(--color-minion); }
+    .seat-role.demon { color: var(--color-demon); }
+    
+    .seat-number {
+        font-size: 0.7rem;
+        position: relative;
+        top: auto;
+        background: var(--bg-dark);
+        padding: 2px 4px;
     }
     
     .day-night-indicator {
-        width: 65px;
-        height: 65px;
+        width: min(65px, 20%);
+        height: min(65px, 20%);
+        padding: clamp(4px, 1vw, 6px);
+        min-width: 55px;
+        min-height: 55px;
     }
     
     .indicator-icon {
-        font-size: 1.2rem;
+        font-size: clamp(1rem, 2.5vw, 1.2rem);
     }
     
     .indicator-text {
-        font-size: 0.65rem;
+        font-size: clamp(0.6rem, 1vw, 0.65rem);
     }
     
     /* 状态图标 */
@@ -1918,6 +2159,22 @@ body {
     .btn {
         padding: var(--spacing-sm) var(--spacing-md);
         font-size: 0.9rem;
+    }
+    
+    /* 控制面板按钮优化 */
+    .control-card {
+        padding: var(--spacing-sm);
+    }
+    
+    .phase-controls {
+        gap: var(--spacing-sm);
+    }
+    
+    .phase-controls .btn {
+        min-width: 0;
+        flex: 1 1 auto;
+        padding: var(--spacing-sm);
+        font-size: 0.85rem;
     }
     
     /* 夜间行动面板 */
@@ -1982,12 +2239,14 @@ body {
     }
     
     .player-seat {
-        width: clamp(28px, 8vw, 36px);
-        height: clamp(28px, 8vw, 36px);
+        /* 使用 CSS 变量，但保留最小值限制 */
+        width: max(var(--seat-size, clamp(28px, 8vw, 36px)), clamp(28px, 8vw, 36px));
+        height: max(var(--seat-size, clamp(28px, 8vw, 36px)), clamp(28px, 8vw, 36px));
     }
     
+    /* 极小屏幕：隐藏所有外部标签，只显示座位号 */
     .seat-name, .seat-role {
-        display: none; /* 极小屏幕隐藏文字，只显示座位号 */
+        display: none !important; /* 强制隐藏，覆盖 480px 的外部标签样式 */
     }
     
     .seat-number {
@@ -1998,17 +2257,27 @@ body {
         color: var(--text-primary);
     }
     
+    .seat-content {
+        /* 确保座位号居中显示 */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
     .day-night-indicator {
-        width: 55px;
-        height: 55px;
+        width: min(55px, 18%);
+        height: min(55px, 18%);
+        padding: clamp(3px, 0.8vw, 5px);
+        min-width: 50px;
+        min-height: 50px;
     }
     
     .indicator-icon {
-        font-size: 1rem;
+        font-size: clamp(0.9rem, 2vw, 1rem);
     }
     
     .indicator-text {
-        font-size: 0.6rem;
+        font-size: clamp(0.55rem, 0.9vw, 0.6rem);
     }
     
     .role-distribution {
@@ -2025,6 +2294,23 @@ body {
     
     .role-dist-label {
         font-size: 0.65rem;
+    }
+    
+    /* 控制面板按钮优化 */
+    .control-card {
+        padding: var(--spacing-xs);
+    }
+    
+    .phase-controls {
+        gap: var(--spacing-xs);
+        flex-direction: column; /* 极小屏幕改为纵向排列 */
+    }
+    
+    .phase-controls .btn {
+        width: 100%;
+        min-width: 0;
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 0.8rem;
     }
 }
 
@@ -2101,7 +2387,7 @@ body {
     }
     
     .game-layout {
-        grid-template-columns: 1fr 300px;
+        grid-template-columns: 1fr min(300px, 35%);
     }
     
     .table-section {
@@ -2115,13 +2401,25 @@ body {
     }
     
     .player-seat {
-        width: clamp(28px, 5vh, 36px);
-        height: clamp(28px, 5vh, 36px);
+        /* 使用 CSS 变量，但保留最小值限制 */
+        width: max(var(--seat-size, clamp(28px, 5vh, 36px)), clamp(28px, 5vh, 36px));
+        height: max(var(--seat-size, clamp(28px, 5vh, 36px)), clamp(28px, 5vh, 36px));
     }
     
     .day-night-indicator {
-        width: 60px;
-        height: 60px;
+        width: min(60px, 20%);
+        height: min(60px, 20%);
+        padding: clamp(4px, 1vw, 6px);
+        min-width: 55px;
+        min-height: 55px;
+    }
+    
+    .indicator-icon {
+        font-size: clamp(1rem, 2.5vw, 1.2rem);
+    }
+    
+    .indicator-text {
+        font-size: clamp(0.6rem, 1vw, 0.65rem);
     }
     
     .modal {

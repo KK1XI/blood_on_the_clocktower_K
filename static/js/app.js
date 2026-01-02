@@ -27,6 +27,7 @@ async function initializeApp() {
     setupEventListeners();
     updatePlayerInputs();
     updateRoleDistribution();
+    setupTableSizeOptimizer();
 }
 
 // ===== API 调用 =====
@@ -149,6 +150,80 @@ async function updateRoleDistribution() {
             <div class="role-dist-label">恶魔</div>
         </div>
     `;
+}
+
+// ===== 工具函数 =====
+// 防抖函数
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// 优化圆桌尺寸，最大化利用空间
+function optimizeTableSize() {
+    const tableSection = document.querySelector('.table-section');
+    const tableContainer = document.querySelector('.table-container');
+    
+    if (!tableSection || !tableContainer) return;
+    
+    // 获取实际可用尺寸（考虑 padding）
+    const sectionRect = tableSection.getBoundingClientRect();
+    const sectionStyle = window.getComputedStyle(tableSection);
+    
+    // 获取 padding（可能是不同方向不同的值）
+    const paddingTop = parseFloat(sectionStyle.paddingTop) || 0;
+    const paddingBottom = parseFloat(sectionStyle.paddingBottom) || 0;
+    const paddingLeft = parseFloat(sectionStyle.paddingLeft) || 0;
+    const paddingRight = parseFloat(sectionStyle.paddingRight) || 0;
+    
+    const availableWidth = sectionRect.width - paddingLeft - paddingRight;
+    const availableHeight = sectionRect.height - paddingTop - paddingBottom;
+    
+    // 计算短边长度
+    const shortSide = Math.min(availableWidth, availableHeight);
+    
+    // table-container 的尺寸直接等于 table-section 的短边长度（不做任何限制）
+    // 应用尺寸
+    tableContainer.style.width = `${shortSide}px`;
+    tableContainer.style.height = `${shortSide}px`;
+    
+    // 如果玩家圆桌已渲染，只更新座位位置，不重新渲染整个圆桌
+    // 这样可以避免循环调用和重复初始化
+    if (gameState.players.length > 0 && document.getElementById('playerCircle')) {
+        // 只更新座位位置，不重新创建 DOM
+        updateSeatPositions();
+    }
+}
+
+// 设置圆桌尺寸优化器
+function setupTableSizeOptimizer() {
+    const tableSection = document.querySelector('.table-section');
+    if (!tableSection) return;
+    
+    // 防抖版本的优化函数
+    const debouncedOptimize = debounce(optimizeTableSize, 100);
+    
+    // 使用 ResizeObserver 监听容器尺寸变化
+    if (window.ResizeObserver) {
+        const resizeObserver = new ResizeObserver(debouncedOptimize);
+        resizeObserver.observe(tableSection);
+        
+        // 也监听 window resize（作为备用）
+        window.addEventListener('resize', debouncedOptimize);
+    } else {
+        // 降级方案：只使用 window resize
+        window.addEventListener('resize', debouncedOptimize);
+    }
+    
+    // 初始计算
+    setTimeout(optimizeTableSize, 100);
 }
 
 // ===== 角色分配 =====
@@ -283,6 +358,11 @@ function startGame() {
     // 更新游戏信息
     const script = scripts.find(s => s.id === gameState.scriptId);
     document.getElementById('currentScript').textContent = script.name;
+    
+    // 优化圆桌尺寸（游戏面板显示后）
+    setTimeout(() => {
+        optimizeTableSize();
+    }, 100);
     updatePhaseIndicator('setup');
     
     // 渲染玩家座位
@@ -388,13 +468,196 @@ async function skipRedHerring() {
     document.getElementById('redHerringModal').classList.remove('active');
 }
 
+// 计算最优座位布局（方案 B：数学公式优化 + 碰撞检测 + 动态座位大小）
+// 核心逻辑：在不触碰边界的前提下，最大化座位尺寸，同时合理分散座位
+function calculateOptimalLayout(containerSize, playerCount) {
+    // 1. 中心指示器占用空间（固定大小，约 120px 或容器的 20%）
+    // 注意：这是中心天数指示器的大小，不是整个布局区域
+    const centerSize = Math.min(120, containerSize * 0.2);
+    const centerRadius = centerSize / 2;
+    
+    // 2. 边距设置：座位边缘与容器边界的最小距离
+    // 这个值决定了座位能有多接近边界
+    const boundaryMargin = 5; // 座位边缘与容器边界的最小距离（像素）
+    
+    // 3. 根据屏幕尺寸确定座位大小范围（响应式）
+    let minSeatSize = 35; // 默认最小值
+    let maxSeatSize = 70; // 默认最大值
+    
+    if (window.innerWidth <= 360) {
+        minSeatSize = 28;
+        maxSeatSize = 50;
+    } else if (window.innerWidth <= 480) {
+        minSeatSize = 32;
+        maxSeatSize = 55;
+    } else if (window.innerWidth <= 768) {
+        minSeatSize = 35;
+        maxSeatSize = 60;
+    }
+    
+    // 4. 计算角度步长（相邻座位之间的角度）
+    const angleStep = (2 * Math.PI) / playerCount;
+    
+    // 5. 核心计算：
+    // - 座位中心到容器中心的距离为 radius
+    // - 座位边缘不能超出容器边界：radius + seatSize/2 + boundaryMargin <= containerSize/2
+    // - 座位边缘不能与中心指示器重叠：radius - seatSize/2 >= centerRadius + gap
+    // - 相邻座位不能重叠：2 * radius * sin(angleStep/2) >= seatSize * 1.1
+    
+    // 计算最大可用半径（座位中心到容器中心的最大距离）
+    // 公式：maxRadius = containerSize/2 - boundaryMargin - seatSize/2
+    // 我们需要为不同的 seatSize 计算对应的 maxRadius
+    
+    // 6. 边界检测函数：检查给定座位尺寸和半径是否满足所有约束
+    const checkLayout = (seatSize, radius) => {
+        // 约束1：座位边缘不超出容器边界
+        // 对于圆形布局，最边缘的座位在角度 0、90、180、270 度时最接近边界
+        // 但由于是正圆，只需检查 radius + seatSize/2 + boundaryMargin <= containerSize/2
+        if (radius + seatSize / 2 + boundaryMargin > containerSize / 2) {
+            return false;
+        }
+        
+        // 约束2：座位边缘不与中心指示器重叠（保留一点间隙）
+        const centerGap = 10; // 座位边缘与中心指示器的最小间隙
+        if (radius - seatSize / 2 < centerRadius + centerGap) {
+            return false;
+        }
+        
+        // 约束3：相邻座位之间不重叠
+        // 相邻座位中心距离 = 2 * radius * sin(angleStep/2)
+        // 需要 >= seatSize * overlapFactor
+        const overlapFactor = 1.15; // 座位之间的最小间隙系数
+        const actualDistance = 2 * radius * Math.sin(angleStep / 2);
+        if (actualDistance < seatSize * overlapFactor) {
+            return false;
+        }
+        
+        return true;
+    };
+    
+    // 7. 搜索最优布局
+    // 策略：优先最大化座位尺寸，在满足约束的情况下选择较大的半径（更分散）
+    let bestSeatSize = minSeatSize;
+    let bestRadius = centerRadius + minSeatSize; // 初始保守值
+    let foundValidLayout = false;
+    
+    const seatSizeStep = 2;
+    const radiusStep = 3;
+    
+    // 从最大座位尺寸开始，逐渐减小，直到找到有效布局
+    for (let testSeatSize = maxSeatSize; testSeatSize >= minSeatSize; testSeatSize -= seatSizeStep) {
+        // 对于当前座位尺寸，计算允许的半径范围
+        const minRadius = centerRadius + 10 + testSeatSize / 2; // 最小半径（保证与中心有间隙）
+        const maxRadius = containerSize / 2 - boundaryMargin - testSeatSize / 2; // 最大半径（保证不超出边界）
+        
+        if (minRadius > maxRadius) {
+            continue; // 当前座位尺寸太大，无法放置
+        }
+        
+        // 检查相邻座位不重叠的约束能否满足
+        // 需要的最小半径 = seatSize * overlapFactor / (2 * sin(angleStep/2))
+        const overlapFactor = 1.15;
+        const requiredMinRadius = (testSeatSize * overlapFactor) / (2 * Math.sin(angleStep / 2));
+        
+        const effectiveMinRadius = Math.max(minRadius, requiredMinRadius);
+        
+        if (effectiveMinRadius > maxRadius) {
+            continue; // 当前座位尺寸下无法满足所有约束
+        }
+        
+        // 找到有效布局！选择最大的半径（最分散）
+        // 但如果半径太大会导致座位太接近边界，我们选择一个平衡点
+        // 使用靠近边界但保留一定余量的半径
+        const optimalRadius = Math.min(maxRadius, effectiveMinRadius + (maxRadius - effectiveMinRadius) * 0.8);
+        
+        // 验证布局是否有效
+        if (checkLayout(testSeatSize, optimalRadius)) {
+            bestSeatSize = testSeatSize;
+            bestRadius = optimalRadius;
+            foundValidLayout = true;
+            break; // 找到最大座位尺寸的有效布局，停止搜索
+        }
+    }
+    
+    // 8. 如果没找到有效布局，使用保守方案
+    if (!foundValidLayout) {
+        // 使用最小座位尺寸，并计算安全的半径
+        bestSeatSize = minSeatSize;
+        const safeRadius = (centerRadius + 10 + minSeatSize / 2 + containerSize / 2 - boundaryMargin - minSeatSize / 2) / 2;
+        bestRadius = Math.max(centerRadius + minSeatSize, safeRadius);
+    }
+    
+    // 调试日志（可选）
+    // console.log('Layout calculated:', { containerSize, playerCount, bestSeatSize, bestRadius, radiusPercent: (bestRadius / containerSize) * 100 });
+    
+    return { 
+        seatSize: Math.round(bestSeatSize), 
+        radius: bestRadius,
+        radiusPercent: (bestRadius / containerSize) * 100
+    };
+}
+
+// 更新座位位置（不重新创建 DOM，避免重复初始化）
+function updateSeatPositions() {
+    const circle = document.getElementById('playerCircle');
+    if (!circle) return;
+    
+    const tableContainer = document.querySelector('.table-container');
+    if (!tableContainer) return;
+    
+    const containerSize = Math.min(tableContainer.offsetWidth, tableContainer.offsetHeight);
+    const playerCount = gameState.players.length;
+    
+    if (playerCount === 0) return;
+    
+    // 使用优化算法计算座位大小和半径
+    const layout = calculateOptimalLayout(containerSize, playerCount);
+    const seatSize = layout.seatSize;
+    const radiusPercent = layout.radiusPercent;
+    
+    // 动态设置座位大小（通过 CSS 变量）
+    document.documentElement.style.setProperty('--seat-size', `${seatSize}px`);
+    
+    // 更新每个座位的位置
+    const centerPercent = 50;
+    const seats = circle.querySelectorAll('.player-seat');
+    
+    seats.forEach((seat, index) => {
+        if (index >= gameState.players.length) return;
+        
+        const angle = (index / gameState.players.length) * 2 * Math.PI - Math.PI / 2;
+        const xPercent = centerPercent + radiusPercent * Math.cos(angle);
+        const yPercent = centerPercent + radiusPercent * Math.sin(angle);
+        
+        seat.style.left = `${xPercent}%`;
+        seat.style.top = `${yPercent}%`;
+    });
+}
+
 function renderPlayerCircle() {
     const circle = document.getElementById('playerCircle');
+    if (!circle) return;
+    
+    // 清空内容（会自动移除所有事件监听器）
     circle.innerHTML = '';
     
+    // 获取容器尺寸
+    const tableContainer = document.querySelector('.table-container');
+    if (!tableContainer) return;
+    
+    const containerSize = Math.min(tableContainer.offsetWidth, tableContainer.offsetHeight);
+    const playerCount = gameState.players.length;
+    
+    // 使用优化算法计算座位大小和半径
+    const layout = calculateOptimalLayout(containerSize, playerCount);
+    const seatSize = layout.seatSize;
+    const radiusPercent = layout.radiusPercent;
+    
+    // 动态设置座位大小（通过 CSS 变量）
+    document.documentElement.style.setProperty('--seat-size', `${seatSize}px`);
+    
     // 使用百分比定位，座位会自动随容器尺寸缩放
-    const centerPercent = 50; // 中心点 50%
-    const radiusPercent = 42; // 半径 42%（预留座位空间）
+    const centerPercent = 50;
     
     gameState.players.forEach((player, index) => {
         const angle = (index / gameState.players.length) * 2 * Math.PI - Math.PI / 2;
@@ -405,10 +668,14 @@ function renderPlayerCircle() {
         const statusClasses = [];
         if (!player.alive) statusClasses.push('dead');
         if (player.poisoned) statusClasses.push('poisoned');
-        if (player.drunk && !player.is_the_drunk) statusClasses.push('drunk'); // 酒鬼不显示普通醉酒样式
+        if (player.drunk && !player.is_the_drunk) statusClasses.push('drunk');
         if (player.protected) statusClasses.push('protected');
         if (player.ability_used) statusClasses.push('ability-used');
-        if (player.is_the_drunk) statusClasses.push('is-the-drunk'); // 酒鬼特殊样式
+        if (player.is_the_drunk) statusClasses.push('is-the-drunk');
+        
+        // 根据角度判断标签位置（用于小屏幕外部标签定位）
+        const normalizedAngle = ((angle + Math.PI / 2) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+        const labelPosition = normalizedAngle < Math.PI ? 'label-bottom' : 'label-top';
         
         // 生成右下角状态图标HTML
         let statusIcons = '';
@@ -426,21 +693,88 @@ function renderPlayerCircle() {
         if (player.is_the_drunk) leftIcons += '<span class="left-icon drunk-role-icon" title="是酒鬼">🍺</span>';
         if (player.butler_master_id) leftIcons += '<span class="left-icon butler-icon" title="是管家">🎩</span>';
         
+        // 生成自定义 tooltip 内容
+        const tooltipContent = `
+            <div class="seat-tooltip">
+                <div class="tooltip-name">${player.name}</div>
+                <div class="tooltip-role ${roleClass}">${player.role?.name || '未分配'}</div>
+            </div>
+        `;
+        
         circle.innerHTML += `
-            <div class="player-seat ${statusClasses.join(' ')}" 
+            <button class="player-seat ${statusClasses.join(' ')} ${labelPosition}" 
+                 type="button"
                  style="left: ${xPercent}%; top: ${yPercent}%;"
                  data-player-id="${player.id}"
-                 onclick="openPlayerDetail(${player.id})">
+                 data-player-name="${player.name}"
+                 data-player-role="${player.role?.name || '未分配'}">
                 <div class="seat-content">
                     <span class="seat-number">${player.id}</span>
-                    <span class="seat-name">${player.name}</span>
-                    <span class="seat-role ${roleClass}">${player.role?.name || '未分配'}</span>
+                    <span class="seat-name" data-full-text="${player.name}">${player.name}</span>
+                    <span class="seat-role ${roleClass}" data-full-text="${player.role?.name || '未分配'}">${player.role?.name || '未分配'}</span>
                     ${leftIcons ? `<div class="left-icons">${leftIcons}</div>` : ''}
                     ${statusIcons ? `<div class="status-icons">${statusIcons}</div>` : ''}
                 </div>
-            </div>
+                ${tooltipContent}
+            </button>
         `;
     });
+    
+    // 初始化点击事件和自定义 tooltip
+    // 使用标记避免重复添加事件监听器，使用防抖避免重复初始化
+    if (window.seatInitializationTimeout) {
+        clearTimeout(window.seatInitializationTimeout);
+    }
+    window.seatInitializationTimeout = setTimeout(() => {
+        const seats = document.querySelectorAll('.player-seat:not([data-click-initialized])');
+        
+        seats.forEach((seat) => {
+            seat.setAttribute('data-click-initialized', 'true');
+            
+            const playerId = seat.getAttribute('data-player-id');
+            const tooltip = seat.querySelector('.seat-tooltip');
+            let tooltipShowTimeout = null;
+            
+            // 隐藏 tooltip 的辅助函数
+            const hideTooltip = () => {
+                if (tooltipShowTimeout) {
+                    clearTimeout(tooltipShowTimeout);
+                    tooltipShowTimeout = null;
+                }
+                seat.classList.remove('tooltip-visible');
+            };
+            
+            // 点击事件处理
+            const clickHandler = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                hideTooltip();
+                
+                if (playerId) {
+                    try {
+                        openPlayerDetail(parseInt(playerId));
+                    } catch (error) {
+                        console.error('Error calling openPlayerDetail:', error);
+                    }
+                }
+            };
+            
+            seat.addEventListener('click', clickHandler, false);
+            
+            // 自定义 tooltip 事件处理
+            if (tooltip) {
+                seat.addEventListener('mouseenter', () => {
+                    tooltipShowTimeout = setTimeout(() => {
+                        seat.classList.add('tooltip-visible');
+                    }, 200);
+                }, false);
+                
+                seat.addEventListener('mouseleave', hideTooltip, false);
+            }
+        });
+        
+        window.seatInitializationTimeout = null;
+    }, 200);
 }
 
 function updatePlayerSelects() {
@@ -1795,8 +2129,13 @@ async function handleExecute() {
 
 // ===== 玩家详情 =====
 function openPlayerDetail(playerId) {
+    console.log('openPlayerDetail called with playerId:', playerId); // 调试日志
     const player = gameState.players.find(p => p.id === playerId);
-    if (!player) return;
+    if (!player) {
+        console.warn('Player not found:', playerId); // 调试日志
+        return;
+    }
+    console.log('Opening player detail for:', player.name); // 调试日志
     
     document.getElementById('playerDetailName').textContent = player.name;
     
