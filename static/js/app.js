@@ -549,15 +549,26 @@ async function handleNightAction(index) {
         // 对于珀(Po)等特殊恶魔，可能可以选择多个目标
         const isMultiKill = item.role_id === 'po' || item.role_id === 'shabaloth';
         
+        // 更新日期: 2026-01-02 - 小恶魔可以选择自己（传刀功能）
+        const isImp = item.role_id === 'imp';
+        const killTargets = isImp ? 
+            alivePlayers : // 小恶魔可以选择包括自己在内的所有存活玩家
+            alivePlayers.filter(p => p.id !== item.player_id); // 其他恶魔不能选自己
+        
         actionUI = `
             <div class="night-action-panel">
                 <h5 style="color: var(--color-minion); margin-bottom: var(--spacing-md);">🗡️ ${roleLabel}击杀</h5>
+                ${isImp ? `
+                <div style="padding: var(--spacing-sm); background: rgba(139, 69, 0, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md); color: var(--color-drunk);">
+                    💡 小恶魔可以选择自杀传刀给爪牙
+                </div>
+                ` : ''}
                 <div class="target-select-group">
                     <label>选择击杀目标:</label>
                     <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
                         <option value="">-- 不击杀任何人 --</option>
-                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
-                            `<option value="${p.id}">${p.name}</option>`
+                        ${killTargets.map(p => 
+                            `<option value="${p.id}">${p.name}${p.id === item.player_id ? ' (自己 - 传刀)' : ''}</option>`
                         ).join('')}
                     </select>
                 </div>
@@ -1284,6 +1295,7 @@ async function completeNightActionWithTarget(index) {
 
 // completeNightAction 已被 completeNightActionWithTarget 替代
 
+// 更新日期: 2026-01-02 - 添加小恶魔传刀和红唇女郎显示
 async function startDay() {
     // 检查镇长替死
     const mayorCheck = await checkMayorSubstitute();
@@ -1310,6 +1322,19 @@ async function startDay() {
         p.protected = false;
     });
     
+    // 处理小恶魔传刀事件
+    if (result.imp_starpass && result.imp_starpass.length > 0) {
+        result.imp_starpass.forEach(starpass => {
+            addLogEntry(`🗡️ ${starpass.old_imp_name} (小恶魔) 自杀传刀！${starpass.new_imp_name} 成为新的小恶魔！`, 'game_event');
+            // 更新本地玩家角色
+            const newImp = gameState.players.find(p => p.id === starpass.new_imp_id);
+            if (newImp) {
+                newImp.role = { id: 'imp', name: '小恶魔' };
+                newImp.role_type = 'demon';
+            }
+        });
+    }
+    
     // 处理夜间死亡
     if (result.night_deaths && result.night_deaths.length > 0) {
         result.night_deaths.forEach(death => {
@@ -1321,6 +1346,16 @@ async function startDay() {
         });
     } else {
         addLogEntry('今晚无人死亡', 'phase');
+    }
+    
+    // 处理红唇女郎触发
+    if (result.scarlet_woman_triggered) {
+        addLogEntry(`💋 红唇女郎 ${result.new_demon_name} 继承了恶魔身份！`, 'game_event');
+        // 更新本地玩家角色
+        const scarletWoman = gameState.players.find(p => p.name === result.new_demon_name);
+        if (scarletWoman) {
+            scarletWoman.role_type = 'demon';
+        }
     }
     
     // 检查游戏结束
@@ -1703,6 +1738,7 @@ function updateVoteCount(nomination) {
     document.getElementById('requiredVotes').textContent = Math.floor(alivePlayers.length / 2) + 1;
 }
 
+// 更新日期: 2026-01-02 - 修复圣徒能力，添加红唇女郎处决后检测
 async function handleExecute() {
     if (!currentNominationId) return;
     
@@ -1728,6 +1764,16 @@ async function handleExecute() {
         // 检查圣徒被处决
         if (result.saint_executed) {
             addLogEntry(`⚡ 圣徒 ${nomination.nominee_name} 被处决！邪恶阵营获胜！`, 'game_end');
+        }
+        
+        // 检查红唇女郎触发
+        if (result.scarlet_woman_triggered) {
+            addLogEntry(`💋 红唇女郎 ${result.new_demon_name} 继承了恶魔身份！游戏继续！`, 'game_event');
+            // 更新本地玩家角色
+            const scarletWoman = gameState.players.find(p => p.name === result.new_demon_name);
+            if (scarletWoman) {
+                scarletWoman.role_type = 'demon';
+            }
         }
     } else {
         nomination.status = 'failed';

@@ -391,6 +391,7 @@ class Game:
                         self.add_log(f"[夜间] {drunk_player['name']} 因旅店老板的能力喝醉了", "night")
         
         # 处理击杀类行动（恶魔）
+        # 更新日期: 2026-01-02 - 添加小恶魔传刀功能
         elif action_type == "kill" and target:
             if not hasattr(self, 'demon_kills'):
                 self.demon_kills = []
@@ -401,6 +402,10 @@ class Game:
                 "target_name": target_player['name'] if target_player else '未知'
             })
             self.add_log(f"[夜间] {player['name']} 选择击杀 {target_player['name'] if target_player else '未知'}", "night")
+            
+            # 小恶魔传刀逻辑：如果小恶魔选择自杀
+            if player and player.get("role", {}).get("id") == "imp" and target == player_id:
+                self.process_imp_suicide(player_id)
         
         # 处理投毒类行动
         elif action_type == "poison" and target:
@@ -510,6 +515,44 @@ class Game:
             if role_id in once_per_game_roles:
                 player["ability_used"] = True
                 self.add_log(f"[系统] {player['name']} 的一次性技能已使用", "info")
+    
+    # 更新日期: 2026-01-02 - 添加小恶魔传刀功能
+    def process_imp_suicide(self, imp_player_id):
+        """处理小恶魔自杀传刀"""
+        imp_player = next((p for p in self.players if p["id"] == imp_player_id), None)
+        if not imp_player:
+            return
+        
+        # 找到存活的爪牙
+        alive_minions = [p for p in self.players if p["alive"] and p.get("role_type") == "minion"]
+        
+        if not alive_minions:
+            self.add_log(f"[夜间] {imp_player['name']} (小恶魔) 自杀，但没有存活的爪牙可以传刀", "night")
+            return
+        
+        # 随机选择一名爪牙成为新的小恶魔
+        new_imp = random.choice(alive_minions)
+        old_role = new_imp.get("role", {}).get("name", "未知")
+        
+        # 更新爪牙的角色为小恶魔
+        new_imp["role"] = {
+            "id": "imp",
+            "name": "小恶魔"
+        }
+        new_imp["role_type"] = "demon"
+        
+        # 标记传刀事件
+        if not hasattr(self, 'imp_starpass'):
+            self.imp_starpass = []
+        self.imp_starpass.append({
+            "old_imp_id": imp_player_id,
+            "old_imp_name": imp_player["name"],
+            "new_imp_id": new_imp["id"],
+            "new_imp_name": new_imp["name"],
+            "old_role": old_role
+        })
+        
+        self.add_log(f"🗡️ {imp_player['name']} (小恶魔) 自杀传刀！{new_imp['name']} (原{old_role}) 成为新的小恶魔！", "night")
     
     def process_night_kills(self):
         """处理夜间击杀，考虑保护效果"""
@@ -727,6 +770,7 @@ class Game:
         self.add_log(f"{voter['name']} 对 {nomination['nominee_name']} 投了{vote_text}票", "vote")
         return {"success": True}
     
+    # 更新日期: 2026-01-02 - 修复圣徒能力，添加红唇女郎处决后检测
     def execute(self, nomination_id):
         """执行处决"""
         nomination = next((n for n in self.nominations if n["id"] == nomination_id), None)
@@ -742,6 +786,9 @@ class Game:
         required_votes = (alive_count // 2) + 1
         
         if nomination["vote_count"] >= required_votes:
+            # 记录被处决者的角色类型（用于后续检查红唇女郎）
+            was_demon = nominee.get("role_type") == "demon"
+            
             nominee["alive"] = False
             nomination["status"] = "executed"
             self.executions.append({
@@ -755,22 +802,39 @@ class Game:
             
             # 检查圣徒能力：如果被处决的是圣徒，邪恶阵营获胜
             nominee_role_id = nominee.get("role", {}).get("id") if nominee.get("role") else None
-            if nominee_role_id == "saint":
-                self.add_log(f"⚡ 圣徒 {nominee['name']} 被处决！邪恶阵营获胜！", "game_end")
-                return {
-                    "success": True, 
-                    "executed": True, 
-                    "player": nominee,
-                    "saint_executed": True,
-                    "game_end": {"ended": True, "winner": "evil", "reason": "圣徒被处决"}
-                }
             
-            return {"success": True, "executed": True, "player": nominee}
+            # 圣徒判定：必须是真正的圣徒角色，且没有醉酒/中毒
+            if nominee_role_id == "saint":
+                # 检查圣徒是否处于醉酒或中毒状态（能力失效）
+                is_affected = nominee.get("drunk") or nominee.get("poisoned")
+                if not is_affected:
+                    self.add_log(f"⚡ 圣徒 {nominee['name']} 被处决！邪恶阵营获胜！", "game_end")
+                    return {
+                        "success": True, 
+                        "executed": True, 
+                        "player": nominee,
+                        "saint_executed": True,
+                        "game_end": {"ended": True, "winner": "evil", "reason": "圣徒被处决"}
+                    }
+                else:
+                    self.add_log(f"[系统] 圣徒 {nominee['name']} 醉酒/中毒，能力失效", "info")
+            
+            # 如果被处决的是恶魔，检查红唇女郎能力
+            result = {"success": True, "executed": True, "player": nominee}
+            if was_demon:
+                game_end = self.check_game_end()
+                if game_end.get("scarlet_woman_triggered"):
+                    result["scarlet_woman_triggered"] = True
+                    result["new_demon_name"] = game_end.get("new_demon")
+                result["game_end"] = game_end
+            
+            return result
         else:
             nomination["status"] = "failed"
             self.add_log(f"{nominee['name']} 未被处决 (获得 {nomination['vote_count']}/{required_votes} 票)", "execution")
             return {"success": True, "executed": False}
     
+    # 更新日期: 2026-01-02 - 添加红唇女郎能力检测
     def check_game_end(self):
         """检查游戏是否结束"""
         alive_players = [p for p in self.players if p["alive"]]
@@ -778,8 +842,16 @@ class Game:
         evil_alive = [p for p in alive_players if p["role_type"] in ["demon", "minion"]]
         good_alive = [p for p in alive_players if p["role_type"] in ["townsfolk", "outsider"]]
         
-        # 恶魔死亡，善良获胜
+        # 恶魔死亡时，检查红唇女郎能力
         if not demons_alive:
+            # 检查是否有红唇女郎可以继承恶魔身份
+            scarlet_woman_result = self.check_scarlet_woman_trigger()
+            if scarlet_woman_result["triggered"]:
+                # 红唇女郎变成恶魔，游戏继续
+                return {"ended": False, "scarlet_woman_triggered": True, 
+                        "new_demon": scarlet_woman_result["new_demon_name"]}
+            
+            # 没有红唇女郎触发，善良获胜
             return {"ended": True, "winner": "good", "reason": "恶魔已被消灭"}
         
         # 只剩2名玩家且恶魔存活，邪恶获胜
@@ -787,6 +859,50 @@ class Game:
             return {"ended": True, "winner": "evil", "reason": "邪恶势力占领了小镇"}
         
         return {"ended": False}
+    
+    # 更新日期: 2026-01-02 - 红唇女郎能力实现
+    def check_scarlet_woman_trigger(self):
+        """检查红唇女郎是否触发能力"""
+        alive_players = [p for p in self.players if p["alive"]]
+        
+        # 红唇女郎能力条件：存活玩家>=5人
+        if len(alive_players) < 5:
+            self.add_log(f"[系统] 存活玩家不足5人（当前{len(alive_players)}人），红唇女郎能力无法触发", "info")
+            return {"triggered": False}
+        
+        # 找到存活的红唇女郎
+        scarlet_woman = next(
+            (p for p in alive_players if p.get("role", {}).get("id") == "scarlet_woman"),
+            None
+        )
+        
+        if not scarlet_woman:
+            return {"triggered": False}
+        
+        # 检查红唇女郎是否醉酒或中毒（能力失效）
+        if scarlet_woman.get("drunk") or scarlet_woman.get("poisoned"):
+            self.add_log(f"[系统] 红唇女郎 {scarlet_woman['name']} 醉酒/中毒，能力无法触发", "info")
+            return {"triggered": False}
+        
+        # 找到刚死亡的恶魔角色
+        dead_demon = next(
+            (p for p in self.players if not p["alive"] and p.get("role_type") == "demon"),
+            None
+        )
+        
+        demon_role = dead_demon.get("role", {}) if dead_demon else {"id": "imp", "name": "小恶魔"}
+        
+        # 红唇女郎成为恶魔
+        scarlet_woman["role"] = demon_role
+        scarlet_woman["role_type"] = "demon"
+        
+        self.add_log(f"💋 红唇女郎 {scarlet_woman['name']} 继承了恶魔身份！成为 {demon_role.get('name', '恶魔')}！", "game_event")
+        
+        return {
+            "triggered": True,
+            "new_demon_id": scarlet_woman["id"],
+            "new_demon_name": scarlet_woman["name"]
+        }
     
     def update_player_status(self, player_id, status_type, value):
         """更新玩家状态"""
@@ -1475,6 +1591,7 @@ def add_night_death(game_id):
     
     return jsonify({"success": True})
 
+# 更新日期: 2026-01-02 - 添加小恶魔传刀和红唇女郎信息返回
 @app.route('/api/game/<game_id>/start_day', methods=['POST'])
 def start_day(game_id):
     """开始白天"""
@@ -1484,12 +1601,26 @@ def start_day(game_id):
     game = games[game_id]
     game.start_day()
     
-    return jsonify({
+    # 检查游戏结束
+    game_end_result = game.check_game_end()
+    
+    response = {
         "success": True,
         "day_number": game.day_number,
         "night_deaths": game.night_deaths,
-        "game_end": game.check_game_end()
-    })
+        "game_end": game_end_result
+    }
+    
+    # 添加小恶魔传刀信息
+    if hasattr(game, 'imp_starpass') and game.imp_starpass:
+        response["imp_starpass"] = game.imp_starpass
+    
+    # 添加红唇女郎触发信息
+    if game_end_result.get("scarlet_woman_triggered"):
+        response["scarlet_woman_triggered"] = True
+        response["new_demon_name"] = game_end_result.get("new_demon")
+    
+    return jsonify(response)
 
 @app.route('/api/game/<game_id>/nominate', methods=['POST'])
 def nominate(game_id):
@@ -1520,6 +1651,7 @@ def vote(game_id):
     return jsonify(result)
 
 @app.route('/api/game/<game_id>/execute', methods=['POST'])
+# 更新日期: 2026-01-02 - 修复处决后游戏结束检测
 def execute(game_id):
     """处决"""
     if game_id not in games:
@@ -1529,7 +1661,8 @@ def execute(game_id):
     game = games[game_id]
     result = game.execute(data.get('nomination_id'))
     
-    if result.get("success"):
+    # 如果 execute 内部没有设置 game_end，则重新检查
+    if result.get("success") and "game_end" not in result:
         result["game_end"] = game.check_game_end()
     
     return jsonify(result)

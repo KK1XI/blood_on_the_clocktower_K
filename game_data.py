@@ -109,7 +109,7 @@ SCRIPTS = {
                 {
                     "id": "soldier",
                     "name": "士兵",
-                    "ability": "恶魔无法杀死你。",
+                    "ability": "恶魔的能力对你无效。",
                     "first_night": False,
                     "other_nights": False,
                     "night_order": 0
@@ -176,7 +176,7 @@ SCRIPTS = {
                 },
                 {
                     "id": "scarlet_woman",
-                    "name": "猩红女郎",
+                    "name": "红唇女郎",
                     "ability": "当存活玩家还有5人或以上时，如果恶魔死亡，你成为恶魔。",
                     "first_night": False,
                     "other_nights": False,
