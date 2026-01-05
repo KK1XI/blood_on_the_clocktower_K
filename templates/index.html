@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+    <canvas id="bg-canvas"></canvas>
     <div class="app-container">
         <!-- 顶部导航 -->
         <header class="header">
@@ -257,6 +258,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/background.js') }}"></script>
 </body>
 </html>
 

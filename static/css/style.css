@@ -75,13 +75,23 @@ html {
 
 body {
     font-family: 'Noto Serif SC', serif;
+    /* WebGL Canvas 回退 */
     background: var(--bg-dark);
     color: var(--text-primary);
     min-height: 100vh;
     line-height: 1.6;
-    background-image: 
-        radial-gradient(ellipse at top, rgba(139, 0, 0, 0.15) 0%, transparent 50%),
-        radial-gradient(ellipse at bottom, rgba(30, 30, 30, 0.8) 0%, transparent 50%);
+    overflow-x: hidden; /* 防止 Canvas 可能导致的微小溢出 */
+}
+
+/* WebGL 背景画布 */
+#bg-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1;
+    pointer-events: none; /* 确保不阻挡用户交互 */
 }
 
 /* ===== App Container ===== */
@@ -219,7 +229,7 @@ body {
     border-bottom: 1px solid rgba(212, 175, 55, 0.3);
 }
 
-/* Script Grid */
+/* 剧本网格 */
 .script-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -288,7 +298,7 @@ body {
     color: var(--text-muted);
 }
 
-/* Player Count */
+/* 玩家数量 */
 .player-count-wrapper {
     display: flex;
     align-items: center;
@@ -335,7 +345,7 @@ body {
     font-family: 'Cinzel', serif;
 }
 
-/* Role Distribution */
+/* 角色分布 */
 .role-distribution {
     display: flex;
     justify-content: center;
@@ -367,7 +377,7 @@ body {
 .role-dist-item.minion .role-dist-count { color: var(--color-minion); }
 .role-dist-item.demon .role-dist-count { color: var(--color-demon); }
 
-/* Player Input */
+/* 玩家输入 */
 .player-input-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -407,7 +417,7 @@ body {
     color: var(--text-muted);
 }
 
-/* Assignment Options */
+/* 分配选项 */
 .assignment-options {
     display: flex;
     justify-content: center;
@@ -529,7 +539,7 @@ body {
     }
 }
 
-/* Table Section */
+/* 表格区域 */
 .table-section {
     display: flex;
     justify-content: center;
@@ -812,7 +822,7 @@ body {
     white-space: nowrap;
 }
 
-/* Control Section */
+/* 控制区域 */
 .control-section {
     display: flex;
     flex-direction: column;
@@ -856,7 +866,7 @@ body {
     text-overflow: ellipsis; /* 显示省略号 */
 }
 
-/* Night Order List */
+/* 夜晚行动顺序列表 */
 .night-order-list {
     max-height: 300px;
     overflow-y: auto;
@@ -914,7 +924,7 @@ body {
     color: var(--text-secondary);
 }
 
-/* Nomination Section */
+/* 提名区域 */
 .nomination-form {
     display: flex;
     align-items: center;
@@ -1139,7 +1149,7 @@ body {
     flex-wrap: wrap;
 }
 
-/* Manual Assign Grid */
+/* 手动分配网格 */
 .manual-assign-grid {
     display: grid;
     gap: var(--spacing-md);
@@ -1180,7 +1190,7 @@ body {
     border-color: var(--color-blood);
 }
 
-/* Player Detail */
+/* 玩家详情 */
 .player-detail-content {
     text-align: center;
 }
@@ -1256,7 +1266,7 @@ body {
     display: none;
 }
 
-/* Vote Grid */
+/* 投票网格 */
 .vote-info {
     text-align: center;
     margin-bottom: var(--spacing-lg);
@@ -1367,7 +1377,7 @@ body {
     font-weight: 600;
 }
 
-/* Game End */
+/* 游戏结束 */
 .game-end-content {
     text-align: center;
     padding: var(--spacing-xl);
@@ -1445,7 +1455,7 @@ body {
     color: var(--text-muted);
 }
 
-/* Status Icons Container */
+/* 状态图标容器 */
 .status-icons {
     position: absolute;
     bottom: -8px;
@@ -1491,7 +1501,7 @@ body {
     background: rgba(255, 182, 193, 0.9);
 }
 
-/* Left Icons Container (左下角图标) */
+/* 左下角图标容器 */
 .left-icons {
     position: absolute;
     bottom: -8px;
@@ -1541,25 +1551,25 @@ body {
     50% { opacity: 0.5; }
 }
 
-/* The Drunk (酒鬼) indicator */
+/* 醉汉指示器 */
 .player-seat.is-the-drunk .seat-content {
     border-color: var(--color-outsider);
     box-shadow: 0 0 12px rgba(155, 89, 182, 0.4);
 }
 
-/* Protected player indicator */
+/* 被保护玩家指示器 */
 .player-seat.protected .seat-content {
     border-color: var(--color-alive);
     box-shadow: 0 0 15px rgba(39, 174, 96, 0.5);
 }
 
-/* Drunk player indicator */
+/* 醉酒玩家指示器 */
 .player-seat.drunk .seat-content {
     border-color: var(--color-drunk);
     box-shadow: 0 0 15px rgba(243, 156, 18, 0.5);
 }
 
-/* Ability used indicator */
+/* 能力已使用指示器 */
 .player-seat.ability-used .seat-content {
     opacity: 0.85;
 }
