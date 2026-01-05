@@ -1471,6 +1471,48 @@ async function handleNightAction(index) {
                 </p>
             </div>
         `;
+    } else if (item.action_type === 'devils_advocate') {
+        // 更新日期: 2026-01-05 - 恶魔代言人行动 UI
+        // 恶魔代言人 - 选择目标（不能选之前选过的），保护免于处决
+        const advocateData = await apiCall(`/api/game/${gameState.gameId}/devils_advocate_targets`);
+        const previousTargets = advocateData.previous_targets || [];
+        
+        // 过滤掉之前选过的目标
+        const availableTargets = alivePlayers.filter(p => 
+            p.id !== item.player_id && !previousTargets.includes(p.id)
+        );
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-minion); margin-bottom: var(--spacing-md);">😈 恶魔代言人 - 保护玩家</h5>
+                ${previousTargets.length > 0 ? `
+                <div style="padding: var(--spacing-sm); background: rgba(100, 100, 100, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <span style="color: var(--text-muted);">之前保护过的玩家: ${previousTargets.map(id => {
+                        const p = gameState.players.find(player => player.id === id);
+                        return p ? p.name : '未知';
+                    }).join(', ')}</span>
+                </div>
+                ` : ''}
+                <div class="target-select-group">
+                    <label>选择一名玩家（明天处决时不会死亡）:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value);">
+                        <option value="">-- 选择目标 --</option>
+                        ${availableTargets.map(p => 
+                            `<option value="${p.id}">${p.name} (${p.role?.name || '未知'})</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ${availableTargets.length === 0 ? `
+                <div style="padding: var(--spacing-md); background: rgba(243, 156, 18, 0.2); border: 1px solid var(--color-drunk); border-radius: var(--radius-md); margin-top: var(--spacing-md);">
+                    <p style="color: var(--color-drunk);">⚠️ 没有可选择的目标（所有存活玩家都已被选过）</p>
+                </div>
+                ` : ''}
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    你选择的玩家明天被处决时不会死亡。<br>
+                    你不能选择之前选过的玩家。
+                </p>
+            </div>
+        `;
     } else if (item.action_type === 'info_first_night') {
         // 首夜信息类 - 自动生成信息
         const actionPlayer = gameState.players.find(p => p.id === item.player_id);
@@ -2429,7 +2471,7 @@ function updateVoteCount(nomination) {
     document.getElementById('requiredVotes').textContent = Math.floor(alivePlayers.length / 2) + 1;
 }
 
-// 更新日期: 2026-01-02 - 修复圣徒能力，添加红唇女郎处决后检测
+// 更新日期: 2026-01-05 - 添加恶魔代言人保护和和平主义者干预
 async function handleExecute() {
     if (!currentNominationId) return;
     
@@ -2444,13 +2486,41 @@ async function handleExecute() {
     
     const nomination = gameState.nominations.find(n => n.id === currentNominationId);
     
+    // 更新日期: 2026-01-05 - 恶魔代言人保护检查
+    if (result.protected_by_devils_advocate) {
+        nomination.status = 'protected';
+        addLogEntry(`🛡️ ${result.player.name} 被恶魔代言人保护，免于处决！`, 'game_event');
+        closeModal('voteModal');
+        renderNominations();
+        renderPlayerCircle();
+        updatePlayerSelects();
+        return;
+    }
+    
+    // 更新日期: 2026-01-05 - 和平主义者干预
+    if (result.pacifist_intervention) {
+        // 显示和平主义者干预弹窗
+        showPacifistModal(result);
+        return;
+    }
+    
     if (result.executed) {
         nomination.status = 'executed';
         const player = gameState.players.find(p => p.id === nomination.nominee_id);
-        if (player) {
+        if (player && !result.zombuul_fake_death) {
             player.alive = false;
         }
-        addLogEntry(`${nomination.nominee_name} 被处决`, 'execution');
+        
+        // 更新日期: 2026-01-05 - 僵怖假死显示
+        if (result.zombuul_fake_death) {
+            const zombuul = gameState.players.find(p => p.id === nomination.nominee_id);
+            if (zombuul) {
+                zombuul.appears_dead = true;
+            }
+            addLogEntry(`💀 ${nomination.nominee_name} 被处决（看起来死了...）`, 'execution');
+        } else {
+            addLogEntry(`${nomination.nominee_name} 被处决`, 'execution');
+        }
         
         // 检查圣徒被处决
         if (result.saint_executed) {
@@ -2482,6 +2552,106 @@ async function handleExecute() {
     if (gameEnd && gameEnd.ended) {
         showGameEnd(gameEnd);
     }
+}
+
+// 更新日期: 2026-01-05 - 和平主义者干预弹窗
+function showPacifistModal(data) {
+    const modal = document.getElementById('pacifistModal') || createPacifistModal();
+    
+    document.getElementById('pacifistNomineeName').textContent = data.nominee_name;
+    document.getElementById('pacifistName').textContent = data.pacifist_name;
+    document.getElementById('pacifistVoteInfo').textContent = `票数: ${data.vote_count}/${data.required_votes}`;
+    
+    // 存储数据供后续使用
+    modal.dataset.nominationId = data.nomination_id;
+    modal.dataset.nomineeId = data.nominee_id;
+    
+    openModal('pacifistModal');
+}
+
+function createPacifistModal() {
+    const modal = document.createElement('div');
+    modal.id = 'pacifistModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>☮️ 和平主义者干预</h3>
+                <button class="close-btn" onclick="closePacifistModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: var(--spacing-lg);">
+                    <p style="font-size: 1.1rem; margin-bottom: var(--spacing-sm);">
+                        <strong id="pacifistNomineeName"></strong> 将被处决
+                    </p>
+                    <p id="pacifistVoteInfo" style="color: var(--text-muted);"></p>
+                </div>
+                <div style="padding: var(--spacing-md); background: rgba(39, 174, 96, 0.2); border-radius: var(--radius-md); margin-bottom: var(--spacing-lg);">
+                    <p>场上存在 <strong id="pacifistName"></strong>（和平主义者）</p>
+                    <p style="color: var(--color-alive); margin-top: var(--spacing-sm);">
+                        和平主义者的能力：如果善良玩家因处决而死亡，可能改为他存活。
+                    </p>
+                </div>
+                <p style="text-align: center; margin-bottom: var(--spacing-md);">
+                    说书人决定该玩家是否存活：
+                </p>
+                <div style="display: flex; gap: var(--spacing-md); justify-content: center;">
+                    <button class="btn btn-success" onclick="pacifistDecision(true)" style="padding: 12px 24px;">
+                        ✓ 玩家存活
+                    </button>
+                    <button class="btn btn-danger" onclick="pacifistDecision(false)" style="padding: 12px 24px;">
+                        ✗ 玩家死亡
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+}
+
+async function pacifistDecision(survives) {
+    const modal = document.getElementById('pacifistModal');
+    const nominationId = parseInt(modal.dataset.nominationId);
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/pacifist_decision`, 'POST', {
+        nomination_id: nominationId,
+        survives: survives
+    });
+    
+    if (!result.success) {
+        alert(result.error || '操作失败');
+        return;
+    }
+    
+    const nomination = gameState.nominations.find(n => n.id === nominationId);
+    
+    if (survives) {
+        nomination.status = 'pacifist_saved';
+        addLogEntry(`☮️ ${nomination.nominee_name} 被和平主义者的能力保护，存活下来！`, 'game_event');
+    } else {
+        nomination.status = 'executed';
+        const player = gameState.players.find(p => p.id === nomination.nominee_id);
+        if (player) {
+            player.alive = false;
+        }
+        addLogEntry(`${nomination.nominee_name} 被处决（和平主义者未能阻止）`, 'execution');
+    }
+    
+    closePacifistModal();
+    closeModal('voteModal');
+    renderNominations();
+    renderPlayerCircle();
+    updatePlayerSelects();
+    
+    // 检查游戏结束
+    if (result.game_end && result.game_end.ended) {
+        showGameEnd(result.game_end);
+    }
+}
+
+function closePacifistModal() {
+    closeModal('pacifistModal');
 }
 
 // ===== 玩家详情 =====
