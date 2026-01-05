@@ -374,43 +374,62 @@ function startGame() {
     // 添加日志
     addLogEntry('游戏开始', 'phase');
     
+    // 更新日期: 2026-01-05 - 延迟检查占卜师，确保 DOM 和游戏面板已完全加载
     // 检查是否有占卜师，如果有则提示设置红鲱鱼
-    checkFortuneTellerSetup();
+    setTimeout(() => {
+        checkFortuneTellerSetup();
+    }, 300);
 }
 
+// 更新日期: 2026-01-02 - 修复占卜师红鲱鱼弹窗未显示问题
 // 检查占卜师红鲱鱼设置
 async function checkFortuneTellerSetup() {
     const fortuneTeller = gameState.players.find(p => p.role && p.role.id === 'fortune_teller');
+    console.log('检查占卜师:', fortuneTeller); // 调试日志
     if (fortuneTeller) {
         // 显示红鲱鱼设置弹窗
+        console.log('显示红鲱鱼设置弹窗');
         showRedHerringModal();
     }
 }
 
 function showRedHerringModal() {
-    const modal = document.getElementById('redHerringModal');
+    let modal = document.getElementById('redHerringModal');
     if (!modal) {
         // 创建弹窗
         createRedHerringModal();
+        modal = document.getElementById('redHerringModal');
     }
-    document.getElementById('redHerringModal').classList.add('active');
-    updateRedHerringOptions();
+    
+    if (modal) {
+        updateRedHerringOptions();
+        modal.classList.add('active');
+        console.log('红鲱鱼弹窗已激活');
+    } else {
+        console.error('无法创建红鲱鱼弹窗');
+    }
 }
 
 function createRedHerringModal() {
+    // 检查是否已存在
+    if (document.getElementById('redHerringModal')) {
+        return;
+    }
+    
     const modalHtml = `
         <div class="modal" id="redHerringModal">
             <div class="modal-content">
                 <h3>🔮 设置占卜师的红鲱鱼</h3>
                 <p>请选择一名善良玩家作为红鲱鱼（占卜师会把该玩家误认为恶魔）</p>
+                <p style="font-size: 0.85rem; color: var(--text-muted);">提示：后端已随机预选了一名红鲱鱼，您可以确认或重新选择</p>
                 <div class="form-group">
                     <select id="redHerringSelect" class="form-select">
                         <option value="">-- 选择玩家 --</option>
                     </select>
                 </div>
                 <div class="modal-actions">
-                    <button class="btn btn-primary" onclick="confirmRedHerring()">确认</button>
-                    <button class="btn btn-secondary" onclick="skipRedHerring()">随机选择</button>
+                    <button class="btn btn-primary" onclick="confirmRedHerring()">确认选择</button>
+                    <button class="btn btn-secondary" onclick="skipRedHerring()">使用随机</button>
                 </div>
             </div>
         </div>
@@ -422,11 +441,18 @@ function updateRedHerringOptions() {
     const select = document.getElementById('redHerringSelect');
     const goodPlayers = gameState.players.filter(p => 
         (p.role_type === 'townsfolk' || p.role_type === 'outsider') && 
-        p.role.id !== 'fortune_teller'
+        p.role && p.role.id !== 'fortune_teller'
     );
     
+    // 检查后端是否已预选红鲱鱼
+    const fortuneTeller = gameState.players.find(p => p.role && p.role.id === 'fortune_teller');
+    const preselectedId = fortuneTeller?.red_herring_id;
+    
     select.innerHTML = '<option value="">-- 选择玩家 --</option>' + 
-        goodPlayers.map(p => `<option value="${p.id}">${p.name} (${p.role.name})</option>`).join('');
+        goodPlayers.map(p => {
+            const isPreselected = p.id === preselectedId;
+            return `<option value="${p.id}" ${isPreselected ? 'selected' : ''}>${p.name} (${p.role?.name || '未知'})${isPreselected ? ' [预选]' : ''}</option>`;
+        }).join('');
 }
 
 async function confirmRedHerring() {
@@ -441,31 +467,73 @@ async function confirmRedHerring() {
     });
     
     if (result.success) {
+        // 更新本地状态 - 清除旧的红鲱鱼标记
+        gameState.players.forEach(p => p.is_red_herring = false);
+        
+        // 设置新的红鲱鱼标记
+        const targetPlayer = gameState.players.find(p => p.id === parseInt(targetId));
+        if (targetPlayer) {
+            targetPlayer.is_red_herring = true;
+        }
+        
+        // 更新占卜师的 red_herring_id
+        const fortuneTeller = gameState.players.find(p => p.role && p.role.id === 'fortune_teller');
+        if (fortuneTeller) {
+            fortuneTeller.red_herring_id = parseInt(targetId);
+        }
+        
         addLogEntry(`占卜师的红鲱鱼已设置为 ${result.red_herring}`, 'setup');
         document.getElementById('redHerringModal').classList.remove('active');
+        
+        // 重新渲染玩家圈以显示红鲱鱼标记
+        renderPlayerCircle();
     } else {
         alert(result.error || '设置失败');
     }
 }
 
 async function skipRedHerring() {
-    // 随机选择一名善良玩家
-    const goodPlayers = gameState.players.filter(p => 
-        (p.role_type === 'townsfolk' || p.role_type === 'outsider') && 
-        p.role.id !== 'fortune_teller'
-    );
+    // 使用后端已预选的红鲱鱼，或随机选择一名善良玩家
+    const fortuneTeller = gameState.players.find(p => p.role && p.role.id === 'fortune_teller');
+    const preselectedId = fortuneTeller?.red_herring_id;
     
-    if (goodPlayers.length > 0) {
-        const randomPlayer = goodPlayers[Math.floor(Math.random() * goodPlayers.length)];
-        const result = await apiCall(`/api/game/${gameState.gameId}/set_red_herring`, 'POST', {
-            target_id: randomPlayer.id
-        });
+    // 清除旧的红鲱鱼标记
+    gameState.players.forEach(p => p.is_red_herring = false);
+    
+    if (preselectedId) {
+        // 使用后端已预选的红鲱鱼
+        const preselectedPlayer = gameState.players.find(p => p.id === preselectedId);
+        if (preselectedPlayer) {
+            preselectedPlayer.is_red_herring = true;
+        }
+        addLogEntry(`占卜师的红鲱鱼保持为 ${preselectedPlayer?.name || '未知'}（后端预选）`, 'setup');
+    } else {
+        // 如果后端没有预选，前端随机选择
+        const goodPlayers = gameState.players.filter(p => 
+            (p.role_type === 'townsfolk' || p.role_type === 'outsider') && 
+            p.role && p.role.id !== 'fortune_teller'
+        );
         
-        if (result.success) {
-            addLogEntry(`占卜师的红鲱鱼已随机设置为 ${result.red_herring}`, 'setup');
+        if (goodPlayers.length > 0) {
+            const randomPlayer = goodPlayers[Math.floor(Math.random() * goodPlayers.length)];
+            const result = await apiCall(`/api/game/${gameState.gameId}/set_red_herring`, 'POST', {
+                target_id: randomPlayer.id
+            });
+            
+            if (result.success) {
+                randomPlayer.is_red_herring = true;
+                if (fortuneTeller) {
+                    fortuneTeller.red_herring_id = randomPlayer.id;
+                }
+                addLogEntry(`占卜师的红鲱鱼已随机设置为 ${result.red_herring}`, 'setup');
+            }
         }
     }
+    
     document.getElementById('redHerringModal').classList.remove('active');
+    
+    // 重新渲染玩家圈以显示红鲱鱼标记
+    renderPlayerCircle();
 }
 
 // 计算最优座位布局（方案 B：数学公式优化 + 碰撞检测 + 动态座位大小）
@@ -922,6 +990,135 @@ async function handleNightAction(index) {
                 </div>
             </div>
         `;
+    } else if (item.action_type === 'zombuul_kill') {
+        // 更新日期: 2026-01-05 - 僵怖击杀
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-demon); margin-bottom: var(--spacing-md);">💀 僵怖击杀</h5>
+                <div style="padding: var(--spacing-sm); background: rgba(139, 0, 0, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <p style="color: var(--color-blood); font-size: 0.9rem;">
+                        僵怖的能力：如果没有人因你的能力死亡，选择一名玩家使其死亡。<br>
+                        第一次死亡时，你会活着但表现为已死亡。
+                    </p>
+                </div>
+                <div class="target-select-group">
+                    <label>选择击杀目标（如今天没人因你能力死亡）:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 不击杀任何人 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div id="protectionWarning" style="display: none; margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(39, 174, 96, 0.2); border-radius: var(--radius-sm); color: var(--color-alive);">
+                    ⚠️ 该目标可能被保护
+                </div>
+            </div>
+        `;
+    } else if (item.action_type === 'shabaloth_kill') {
+        // 更新日期: 2026-01-05 - 沙巴洛斯击杀（杀两人 + 可复活）
+        const reviveData = await apiCall(`/api/game/${gameState.gameId}/shabaloth_revive_targets`);
+        const deadPlayers = reviveData.dead_players || [];
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-demon); margin-bottom: var(--spacing-md);">👹 沙巴洛斯击杀</h5>
+                <div style="padding: var(--spacing-sm); background: rgba(139, 0, 0, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <p style="color: var(--color-blood); font-size: 0.9rem;">
+                        沙巴洛斯每晚可以选择两名玩家使其死亡。<br>
+                        同时，死去的玩家可能会复活（由说书人决定）。
+                    </p>
+                </div>
+                <div class="target-select-group">
+                    <label>选择第一个击杀目标:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 不击杀 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                    <label>选择第二个击杀目标:</label>
+                    <select id="nightActionSecondTarget" class="form-select" onchange="updateNightActionSecondTarget(this.value)">
+                        <option value="">-- 不击杀 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ${deadPlayers.length > 0 ? `
+                <div class="target-select-group" style="margin-top: var(--spacing-md); padding-top: var(--spacing-md); border-top: 1px solid rgba(255,255,255,0.1);">
+                    <label style="color: var(--color-alive);">🔄 选择要复活的玩家 (可选):</label>
+                    <select id="shabalothReviveTarget" class="form-select">
+                        <option value="">-- 不复活任何人 --</option>
+                        ${deadPlayers.map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ` : '<p style="color: var(--text-muted); margin-top: var(--spacing-md);">目前没有死亡玩家可以复活</p>'}
+                <div id="protectionWarning" style="display: none; margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(39, 174, 96, 0.2); border-radius: var(--radius-sm); color: var(--color-alive);">
+                    ⚠️ 该目标可能被保护
+                </div>
+            </div>
+        `;
+    } else if (item.action_type === 'po_kill') {
+        // 更新日期: 2026-01-05 - 珀击杀（上晚不杀则本晚可杀三人）
+        const poStatus = await apiCall(`/api/game/${gameState.gameId}/po_status`);
+        const canKillThree = poStatus.can_kill_three || false;
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-demon); margin-bottom: var(--spacing-md);">🔥 珀击杀</h5>
+                <div style="padding: var(--spacing-sm); background: rgba(139, 0, 0, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <p style="color: var(--color-blood); font-size: 0.9rem;">
+                        珀每晚可以选择一名玩家使其死亡。<br>
+                        如果上一晚没有选择任何人，本晚可以选择三名玩家使其死亡。
+                    </p>
+                    ${canKillThree ? `
+                    <p style="color: var(--color-gold); font-weight: bold; margin-top: var(--spacing-sm);">
+                        ⚡ 上一晚未行动，本晚可击杀三人！
+                    </p>
+                    ` : ''}
+                </div>
+                <div class="target-select-group">
+                    <label>选择第一个击杀目标:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value)">
+                        <option value="">-- 不击杀任何人 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ${canKillThree ? `
+                <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                    <label>选择第二个击杀目标:</label>
+                    <select id="poSecondTarget" class="form-select">
+                        <option value="">-- 不击杀 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                    <label>选择第三个击杀目标:</label>
+                    <select id="poThirdTarget" class="form-select">
+                        <option value="">-- 不击杀 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ` : ''}
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    ${canKillThree ? '选择不击杀任何人将重置三杀状态' : '选择不击杀任何人，下一晚可击杀三人'}
+                </p>
+                <div id="protectionWarning" style="display: none; margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(39, 174, 96, 0.2); border-radius: var(--radius-sm); color: var(--color-alive);">
+                    ⚠️ 该目标可能被保护
+                </div>
+            </div>
+        `;
     } else if (item.action_type === 'protect') {
         // 保护类角色 - 僧侣、旅店老板等
         const isInnkeeper = item.role_id === 'innkeeper';
@@ -1232,6 +1429,48 @@ async function handleNightAction(index) {
                 </p>
             </div>
         `;
+    } else if (item.action_type === 'exorcist') {
+        // 更新日期: 2026-01-05 - 驱魔人行动 UI
+        // 驱魔人 - 选择目标（不能选之前选过的）
+        const exorcistData = await apiCall(`/api/game/${gameState.gameId}/exorcist_targets`);
+        const previousTargets = exorcistData.previous_targets || [];
+        
+        // 过滤掉之前选过的目标
+        const availableTargets = alivePlayers.filter(p => 
+            p.id !== item.player_id && !previousTargets.includes(p.id)
+        );
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-townsfolk); margin-bottom: var(--spacing-md);">✝️ 驱魔人 - 选择目标</h5>
+                ${previousTargets.length > 0 ? `
+                <div style="padding: var(--spacing-sm); background: rgba(100, 100, 100, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <span style="color: var(--text-muted);">之前选过的玩家: ${previousTargets.map(id => {
+                        const p = gameState.players.find(player => player.id === id);
+                        return p ? p.name : '未知';
+                    }).join(', ')}</span>
+                </div>
+                ` : ''}
+                <div class="target-select-group">
+                    <label>选择一名玩家（不能选择之前选过的）:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value);">
+                        <option value="">-- 选择目标 --</option>
+                        ${availableTargets.map(p => 
+                            `<option value="${p.id}">${p.name} (${p.role?.name || '未知'})</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ${availableTargets.length === 0 ? `
+                <div style="padding: var(--spacing-md); background: rgba(243, 156, 18, 0.2); border: 1px solid var(--color-drunk); border-radius: var(--radius-md); margin-top: var(--spacing-md);">
+                    <p style="color: var(--color-drunk);">⚠️ 没有可选择的目标（所有存活玩家都已被选过）</p>
+                </div>
+                ` : ''}
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    如果你选择了恶魔，恶魔今晚无法行动（无法击杀任何人）。<br>
+                    你不能选择之前选过的玩家。
+                </p>
+            </div>
+        `;
     } else if (item.action_type === 'info_first_night') {
         // 首夜信息类 - 自动生成信息
         const actionPlayer = gameState.players.find(p => p.id === item.player_id);
@@ -1491,6 +1730,35 @@ async function completeNightActionWithTarget(index) {
         };
     }
     
+    // 更新日期: 2026-01-05 - 沙巴洛斯特殊处理：发送第二个目标和复活目标
+    if (item.action_type === 'shabaloth_kill') {
+        const reviveSelect = document.getElementById('shabalothReviveTarget');
+        const reviveTargetId = reviveSelect ? parseInt(reviveSelect.value) || null : null;
+        
+        actionData.extra_data = {
+            second_target: secondTarget,
+            revive_target: reviveTargetId
+        };
+    }
+    
+    // 更新日期: 2026-01-05 - 珀特殊处理：发送多个目标
+    if (item.action_type === 'po_kill') {
+        const targets = [];
+        if (target) targets.push(target);
+        
+        const secondTargetSelect = document.getElementById('poSecondTarget');
+        const thirdTargetSelect = document.getElementById('poThirdTarget');
+        
+        if (secondTargetSelect && secondTargetSelect.value) {
+            targets.push(parseInt(secondTargetSelect.value));
+        }
+        if (thirdTargetSelect && thirdTargetSelect.value) {
+            targets.push(parseInt(thirdTargetSelect.value));
+        }
+        
+        actionData.extra_data = { targets: targets };
+    }
+    
     // 记录夜间行动
     await apiCall(`/api/game/${gameState.gameId}/night_action`, 'POST', actionData);
     
@@ -1711,7 +1979,96 @@ async function startDay() {
     document.getElementById('startNightBtn').disabled = false;
     document.getElementById('startDayBtn').disabled = true;
     
+    // 更新日期: 2026-01-05 - 检查并更新杀手能力状态
+    await checkSlayerAbility();
+    
     addLogEntry(`第 ${gameState.dayNumber} 天开始`, 'phase');
+}
+
+// 更新日期: 2026-01-05 - 检查杀手能力状态
+async function checkSlayerAbility() {
+    const slayerSection = document.getElementById('slayerAbilitySection');
+    const slayerTargetSelect = document.getElementById('slayerTargetSelect');
+    
+    if (!slayerSection || !slayerTargetSelect) return;
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/slayer_status`);
+    
+    if (result.has_slayer && !result.ability_used) {
+        // 有杀手且能力未使用
+        slayerSection.style.display = 'block';
+        
+        // 填充目标选择
+        const alivePlayers = gameState.players.filter(p => p.alive && p.id !== result.slayer_id);
+        slayerTargetSelect.innerHTML = '<option value="">选择目标</option>' + 
+            alivePlayers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+        
+        // 存储杀手 ID
+        slayerSection.dataset.slayerId = result.slayer_id;
+        slayerSection.dataset.slayerName = result.slayer_name;
+    } else {
+        // 无杀手或能力已使用
+        slayerSection.style.display = 'none';
+    }
+}
+
+// 更新日期: 2026-01-05 - 使用杀手能力
+async function useSlayerAbility() {
+    const slayerSection = document.getElementById('slayerAbilitySection');
+    const slayerTargetSelect = document.getElementById('slayerTargetSelect');
+    
+    const slayerId = parseInt(slayerSection.dataset.slayerId);
+    const targetId = parseInt(slayerTargetSelect.value);
+    
+    if (!targetId) {
+        alert('请选择一名目标');
+        return;
+    }
+    
+    const slayerName = slayerSection.dataset.slayerName;
+    const targetPlayer = gameState.players.find(p => p.id === targetId);
+    
+    if (!confirm(`确定让 ${slayerName}（杀手）选择 ${targetPlayer.name} 吗？\n\n注意：此能力仅能使用一次！`)) {
+        return;
+    }
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/slayer_ability`, 'POST', {
+        slayer_id: slayerId,
+        target_id: targetId
+    });
+    
+    if (result.success) {
+        if (result.target_died) {
+            addLogEntry(`🗡️ ${result.slayer_name}（杀手）选择了 ${result.target_name}，${result.target_name} 是恶魔，立即死亡！`, 'death');
+            
+            // 更新本地状态
+            if (targetPlayer) {
+                targetPlayer.alive = false;
+            }
+            
+            // 检查游戏结束
+            if (result.game_end && result.game_end.ended) {
+                showGameEnd(result.game_end);
+                return;
+            }
+            
+            renderPlayerCircle();
+            updatePlayerSelects();
+        } else {
+            addLogEntry(`🗡️ ${result.slayer_name}（杀手）选择了 ${result.target_name}，${result.reason || '目标不是恶魔，无事发生'}`, 'ability');
+        }
+        
+        // 标记本地杀手能力已使用
+        const slayer = gameState.players.find(p => p.id === slayerId);
+        if (slayer) {
+            slayer.ability_used = true;
+        }
+        
+        // 隐藏杀手能力面板
+        slayerSection.style.display = 'none';
+    } else {
+        alert(result.error || '使用能力失败');
+    }
 }
 
 // 检查镇长替死
