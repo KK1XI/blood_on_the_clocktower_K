@@ -35,6 +35,9 @@ class Game:
         self.zombuul_first_death = False  # 僵怖是否已经"假死"过
         self.po_skipped_last_night = False  # 珀上一晚是否跳过了行动
         self.shabaloth_revive_available = False  # 沙巴洛斯是否可以复活
+        # 更新日期: 2026-01-05 - 恶魔代言人追踪
+        self.devils_advocate_previous_targets = []  # 恶魔代言人之前选过的目标
+        self.devils_advocate_protected = None  # 今天被恶魔代言人保护的玩家ID
         
     def to_dict(self):
         return {
@@ -654,6 +657,27 @@ class Game:
                 else:
                     self.add_log(f"[夜间] {player['name']} (驱魔人) 选择了 {target_player['name']}（醉酒/中毒，能力无效）", "night")
         
+        # 更新日期: 2026-01-05 - 恶魔代言人选择目标
+        elif action_type == "devils_advocate" and target:
+            if target_player and player:
+                # 记录恶魔代言人选择的目标
+                if not hasattr(self, 'devils_advocate_previous_targets'):
+                    self.devils_advocate_previous_targets = []
+                
+                # 将目标添加到之前选过的列表
+                self.devils_advocate_previous_targets.append(target)
+                
+                # 检查恶魔代言人是否醉酒/中毒
+                is_affected = player.get("drunk") or player.get("poisoned")
+                
+                if not is_affected:
+                    # 设置今天被保护的玩家
+                    self.devils_advocate_protected = target
+                    target_player["devils_advocate_protected"] = True
+                    self.add_log(f"[夜间] {player['name']} (恶魔代言人) 选择保护 {target_player['name']}，明天无法被处决", "night")
+                else:
+                    self.add_log(f"[夜间] {player['name']} (恶魔代言人) 选择了 {target_player['name']}（醉酒/中毒，能力无效）", "night")
+        
         # 处理跳过行动
         elif action_type == "skip":
             self.add_log(f"[夜间] {player['name']} 选择不行动", "night")
@@ -708,6 +732,59 @@ class Game:
         
         self.add_log(f"🗡️ {imp_player['name']} (小恶魔) 自杀传刀！{new_imp['name']} (原{old_role}) 成为新的小恶魔！", "night")
     
+    # 更新日期: 2026-01-05 - 茶艺师保护检查辅助函数
+    def _is_protected_by_tea_lady(self, player_id):
+        """检查玩家是否被茶艺师保护（茶艺师的存活善良邻居无法死亡）"""
+        # 找到存活的茶艺师
+        tea_lady = next(
+            (p for p in self.players if p["alive"] and p.get("role", {}).get("id") == "tea_lady"),
+            None
+        )
+        
+        if not tea_lady:
+            return False
+        
+        # 检查茶艺师是否醉酒/中毒
+        if tea_lady.get("drunk") or tea_lady.get("poisoned"):
+            return False
+        
+        # 获取茶艺师的座位索引
+        tea_lady_seat = tea_lady.get("seat_number", 0)
+        total_players = len(self.players)
+        
+        # 计算茶艺师的两个邻居（环形座位）
+        left_seat = (tea_lady_seat - 2) % total_players + 1  # 左边邻居
+        right_seat = tea_lady_seat % total_players + 1  # 右边邻居
+        
+        left_neighbor = next((p for p in self.players if p.get("seat_number") == left_seat), None)
+        right_neighbor = next((p for p in self.players if p.get("seat_number") == right_seat), None)
+        
+        # 检查两个邻居是否都存活且都是善良的
+        if not left_neighbor or not right_neighbor:
+            return False
+        
+        if not left_neighbor["alive"] or not right_neighbor["alive"]:
+            return False
+        
+        left_is_good = left_neighbor.get("role_type") in ["townsfolk", "outsider"]
+        right_is_good = right_neighbor.get("role_type") in ["townsfolk", "outsider"]
+        
+        if not (left_is_good and right_is_good):
+            return False
+        
+        # 检查目标玩家是否是茶艺师的邻居
+        target_player = next((p for p in self.players if p["id"] == player_id), None)
+        if not target_player:
+            return False
+        
+        target_seat = target_player.get("seat_number", 0)
+        
+        # 如果目标是茶艺师的邻居，则被保护
+        if target_seat == left_seat or target_seat == right_seat:
+            return True
+        
+        return False
+
     def process_night_kills(self):
         """处理夜间击杀，考虑保护效果"""
         if not hasattr(self, 'demon_kills'):
@@ -733,6 +810,12 @@ class Game:
                 if not target_player.get("poisoned") and not target_player.get("drunk"):
                     self.add_log(f"{target_player['name']} 是士兵，免疫了恶魔的击杀", "night")
                     continue
+            
+            # 更新日期: 2026-01-05 - 茶艺师保护检查
+            # 检查目标是否被茶艺师保护（茶艺师存活的邻居且两邻居都是善良的）
+            if self._is_protected_by_tea_lady(target_id):
+                self.add_log(f"🍵 {target_player['name']} 被茶艺师保护，无法死亡", "night")
+                continue
             
             # 检查是否是镇长（可能由其他玩家替死）
             # 这里记录镇长被攻击，具体替死处理由 process_mayor_death 完成
@@ -791,6 +874,11 @@ class Game:
         self.current_phase = "day"
         self.nominations = []
         self.votes = {}
+        
+        # 更新日期: 2026-01-05 - 清除上一天的恶魔代言人保护
+        self.devils_advocate_protected = None
+        for p in self.players:
+            p.pop("devils_advocate_protected", None)
         
         # 处理恶魔击杀（考虑保护）
         demon_deaths = self.process_night_kills()
@@ -953,6 +1041,46 @@ class Game:
         required_votes = (alive_count // 2) + 1
         
         if nomination["vote_count"] >= required_votes:
+            # 更新日期: 2026-01-05 - 恶魔代言人保护检查
+            # 检查被提名者是否被恶魔代言人保护
+            if nominee.get("devils_advocate_protected"):
+                nomination["status"] = "protected"
+                # 清除保护标记（只保护一次处决）
+                nominee["devils_advocate_protected"] = False
+                self.add_log(f"🛡️ {nominee['name']} 被恶魔代言人保护，免于处决", "execution")
+                return {
+                    "success": True, 
+                    "executed": False, 
+                    "protected_by_devils_advocate": True,
+                    "player": nominee
+                }
+            
+            # 更新日期: 2026-01-05 - 和平主义者能力检查
+            # 检查是否有和平主义者且被处决者是善良玩家
+            nominee_is_good = nominee.get("role_type") in ["townsfolk", "outsider"]
+            if nominee_is_good:
+                pacifist = next(
+                    (p for p in self.players if p["alive"] and p.get("role", {}).get("id") == "pacifist"),
+                    None
+                )
+                if pacifist:
+                    # 检查和平主义者是否醉酒/中毒
+                    pacifist_affected = pacifist.get("drunk") or pacifist.get("poisoned")
+                    if not pacifist_affected:
+                        # 由说书人决定是否让玩家存活 - 这里标记需要说书人决定
+                        # 我们返回一个特殊状态让前端处理
+                        return {
+                            "success": True,
+                            "executed": False,
+                            "pacifist_intervention": True,
+                            "pacifist_name": pacifist["name"],
+                            "nominee_id": nominee["id"],
+                            "nominee_name": nominee["name"],
+                            "vote_count": nomination["vote_count"],
+                            "required_votes": required_votes,
+                            "nomination_id": nomination["id"]
+                        }
+            
             # 记录被处决者的角色类型（用于后续检查红唇女郎）
             was_demon = nominee.get("role_type") == "demon"
             
@@ -1744,6 +1872,11 @@ def start_night(game_id):
         if role_id == "exorcist":
             return "exorcist"
         
+        # 更新日期: 2026-01-05 - 恶魔代言人行动类型
+        # 恶魔代言人 - 选择目标（不能选之前选过的），保护其免于处决
+        if role_id == "devils_advocate":
+            return "devils_advocate"
+        
         # 首夜信息类
         first_night_info = ["washerwoman", "librarian", "investigator", "chef", "clockmaker"]
         if role_id in first_night_info:
@@ -2204,6 +2337,72 @@ def get_shabaloth_revive_targets(game_id):
     return jsonify({
         "dead_players": dead_players
     })
+
+# 更新日期: 2026-01-05 - 获取恶魔代言人之前选过的目标
+@app.route('/api/game/<game_id>/devils_advocate_targets', methods=['GET'])
+def get_devils_advocate_targets(game_id):
+    """获取恶魔代言人之前选过的目标"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    
+    previous_targets = getattr(game, 'devils_advocate_previous_targets', [])
+    
+    return jsonify({
+        "previous_targets": previous_targets
+    })
+
+# 更新日期: 2026-01-05 - 和平主义者决定是否让玩家存活
+@app.route('/api/game/<game_id>/pacifist_decision', methods=['POST'])
+def pacifist_decision(game_id):
+    """和平主义者决定是否让善良玩家存活"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    data = request.json
+    game = games[game_id]
+    
+    nomination_id = data.get('nomination_id')
+    player_survives = data.get('survives', False)  # True = 玩家存活, False = 玩家死亡
+    
+    nomination = next((n for n in game.nominations if n["id"] == nomination_id), None)
+    if not nomination:
+        return jsonify({"error": "无效的提名"}), 400
+    
+    nominee = next((p for p in game.players if p["id"] == nomination["nominee_id"]), None)
+    if not nominee:
+        return jsonify({"error": "无效的被提名者"}), 400
+    
+    if player_survives:
+        # 和平主义者保护玩家存活
+        nomination["status"] = "pacifist_saved"
+        game.add_log(f"☮️ {nominee['name']} 原本会被处决，但和平主义者的能力使其存活", "execution")
+        return jsonify({
+            "success": True,
+            "executed": False,
+            "pacifist_saved": True,
+            "player": nominee
+        })
+    else:
+        # 说书人选择让玩家死亡
+        nominee["alive"] = False
+        nomination["status"] = "executed"
+        game.executions.append({
+            "day": game.day_number,
+            "executed_id": nominee["id"],
+            "executed_name": nominee["name"],
+            "vote_count": nomination["vote_count"]
+        })
+        game.add_log(f"{nominee['name']} 被处决（和平主义者未能阻止）", "execution")
+        
+        # 检查游戏结束
+        result = {"success": True, "executed": True, "player": nominee}
+        if nominee.get("role_type") == "demon":
+            game_end = game.check_game_end()
+            result["game_end"] = game_end
+        
+        return jsonify(result)
 
 
 if __name__ == '__main__':
