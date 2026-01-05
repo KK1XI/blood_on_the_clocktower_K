@@ -28,6 +28,13 @@ class Game:
         self.night_deaths = []
         self.game_log = []
         self.created_at = datetime.now().isoformat()
+        # 更新日期: 2026-01-05 - 驱魔人追踪
+        self.exorcist_previous_targets = []  # 驱魔人之前选过的目标
+        self.demon_exorcised_tonight = False  # 恶魔今晚是否被驱魔
+        # 更新日期: 2026-01-05 - 僵怖、沙巴洛斯、珀追踪
+        self.zombuul_first_death = False  # 僵怖是否已经"假死"过
+        self.po_skipped_last_night = False  # 珀上一晚是否跳过了行动
+        self.shabaloth_revive_available = False  # 沙巴洛斯是否可以复活
         
     def to_dict(self):
         return {
@@ -236,6 +243,18 @@ class Game:
             self.players.append(player)
         
         self.add_log(f"已手动分配 {len(assignments)} 名玩家的角色", "setup")
+        
+        # 更新日期: 2026-01-05 - 手动分配也需要检查并设置占卜师红鲱鱼
+        # 检查是否有占卜师，如果有，需要设置红鲱鱼
+        fortune_teller = next((p for p in self.players if p.get("role") and p["role"].get("id") == "fortune_teller"), None)
+        if fortune_teller:
+            # 随机选择一名善良玩家作为红鲱鱼
+            good_players = [p for p in self.players if p["role_type"] in ["townsfolk", "outsider"] and p["id"] != fortune_teller["id"]]
+            if good_players:
+                red_herring = random.choice(good_players)
+                fortune_teller["red_herring_id"] = red_herring["id"]
+                self.add_log(f"占卜师的红鲱鱼已设置（需说书人在开局时确认或修改）", "setup")
+        
         return self.players
     
     def _find_role_by_id(self, role_id):
@@ -264,6 +283,8 @@ class Game:
         self.night_actions = []
         self.protected_players = []  # 今晚被保护的玩家ID列表
         self.demon_kills = []  # 恶魔选择的击杀目标
+        # 更新日期: 2026-01-05 - 重置驱魔人状态
+        self.demon_exorcised_tonight = False  # 重置恶魔被驱魔状态
         
         # 重置所有玩家的保护状态，并检查状态过期
         for player in self.players:
@@ -391,21 +412,131 @@ class Game:
                         self.add_log(f"[夜间] {drunk_player['name']} 因旅店老板的能力喝醉了", "night")
         
         # 处理击杀类行动（恶魔）
-        # 更新日期: 2026-01-02 - 添加小恶魔传刀功能
+        # 更新日期: 2026-01-05 - 添加驱魔人阻止恶魔行动逻辑
         elif action_type == "kill" and target:
-            if not hasattr(self, 'demon_kills'):
-                self.demon_kills = []
-            self.demon_kills.append({
-                "killer_id": player_id,
-                "target_id": target,
-                "killer_name": player['name'] if player else '未知',
-                "target_name": target_player['name'] if target_player else '未知'
-            })
-            self.add_log(f"[夜间] {player['name']} 选择击杀 {target_player['name'] if target_player else '未知'}", "night")
-            
-            # 小恶魔传刀逻辑：如果小恶魔选择自杀
-            if player and player.get("role", {}).get("id") == "imp" and target == player_id:
-                self.process_imp_suicide(player_id)
+            # 检查恶魔是否被驱魔人阻止
+            if getattr(self, 'demon_exorcised_tonight', False):
+                self.add_log(f"[夜间] {player['name']} 被驱魔人阻止，无法击杀", "night")
+                # 小恶魔传刀仍然可以生效（自杀不受驱魔影响）
+                if player and player.get("role", {}).get("id") == "imp" and target == player_id:
+                    self.process_imp_suicide(player_id)
+            else:
+                if not hasattr(self, 'demon_kills'):
+                    self.demon_kills = []
+                self.demon_kills.append({
+                    "killer_id": player_id,
+                    "target_id": target,
+                    "killer_name": player['name'] if player else '未知',
+                    "target_name": target_player['name'] if target_player else '未知'
+                })
+                self.add_log(f"[夜间] {player['name']} 选择击杀 {target_player['name'] if target_player else '未知'}", "night")
+                
+                # 小恶魔传刀逻辑：如果小恶魔选择自杀
+                if player and player.get("role", {}).get("id") == "imp" and target == player_id:
+                    self.process_imp_suicide(player_id)
+        
+        # 更新日期: 2026-01-05 - 僵怖击杀（如果今天没人因其能力死亡才能杀人）
+        elif action_type == "zombuul_kill":
+            if getattr(self, 'demon_exorcised_tonight', False):
+                self.add_log(f"[夜间] {player['name']} (僵怖) 被驱魔人阻止，无法击杀", "night")
+            elif target:
+                # 检查今天白天是否有人死亡（被处决等）
+                # 僵怖只有在"没有人因其能力死亡"时才能杀人
+                # 这里简化处理：如果选择了目标就添加到击杀列表
+                if not hasattr(self, 'demon_kills'):
+                    self.demon_kills = []
+                self.demon_kills.append({
+                    "killer_id": player_id,
+                    "target_id": target,
+                    "killer_name": player['name'] if player else '未知',
+                    "target_name": target_player['name'] if target_player else '未知',
+                    "kill_type": "zombuul"
+                })
+                self.add_log(f"[夜间] {player['name']} (僵怖) 选择击杀 {target_player['name'] if target_player else '未知'}", "night")
+            else:
+                self.add_log(f"[夜间] {player['name']} (僵怖) 选择不击杀任何人", "night")
+        
+        # 更新日期: 2026-01-05 - 沙巴洛斯击杀（每晚杀两人，可选复活）
+        elif action_type == "shabaloth_kill":
+            if getattr(self, 'demon_exorcised_tonight', False):
+                self.add_log(f"[夜间] {player['name']} (沙巴洛斯) 被驱魔人阻止，无法击杀", "night")
+            else:
+                if not hasattr(self, 'demon_kills'):
+                    self.demon_kills = []
+                
+                # 第一个目标
+                if target:
+                    self.demon_kills.append({
+                        "killer_id": player_id,
+                        "target_id": target,
+                        "killer_name": player['name'] if player else '未知',
+                        "target_name": target_player['name'] if target_player else '未知',
+                        "kill_type": "shabaloth"
+                    })
+                    self.add_log(f"[夜间] {player['name']} (沙巴洛斯) 选择击杀 {target_player['name']}", "night")
+                
+                # 第二个目标（通过 extra_data 传递）
+                second_target = extra_data.get("second_target") if extra_data else None
+                if second_target:
+                    second_target_player = next((p for p in self.players if p["id"] == second_target), None)
+                    if second_target_player:
+                        self.demon_kills.append({
+                            "killer_id": player_id,
+                            "target_id": second_target,
+                            "killer_name": player['name'] if player else '未知',
+                            "target_name": second_target_player['name'],
+                            "kill_type": "shabaloth"
+                        })
+                        self.add_log(f"[夜间] {player['name']} (沙巴洛斯) 选择击杀 {second_target_player['name']}", "night")
+                
+                # 复活（通过 extra_data 传递）
+                revive_target = extra_data.get("revive_target") if extra_data else None
+                if revive_target:
+                    revive_player = next((p for p in self.players if p["id"] == revive_target), None)
+                    if revive_player and not revive_player["alive"]:
+                        revive_player["alive"] = True
+                        revive_player["vote_token"] = True
+                        self.add_log(f"[夜间] {player['name']} (沙巴洛斯) 复活了 {revive_player['name']}", "night")
+        
+        # 更新日期: 2026-01-05 - 珀击杀（上晚不杀则本晚可杀三人）
+        elif action_type == "po_kill":
+            if getattr(self, 'demon_exorcised_tonight', False):
+                self.add_log(f"[夜间] {player['name']} (珀) 被驱魔人阻止，无法击杀", "night")
+                # 即使被驱魔，也记录为"选择了行动"，不触发三杀
+                self.po_skipped_last_night = False
+            elif target is None and (extra_data is None or not extra_data.get("targets")):
+                # 选择不杀任何人 - 下一晚可以杀三人
+                self.po_skipped_last_night = True
+                self.add_log(f"[夜间] {player['name']} (珀) 选择不击杀任何人（下一晚可杀三人）", "night")
+            else:
+                if not hasattr(self, 'demon_kills'):
+                    self.demon_kills = []
+                
+                # 获取目标列表（可能是1个或3个）
+                targets = extra_data.get("targets", [target]) if extra_data else [target]
+                if target and target not in targets:
+                    targets = [target] + targets
+                
+                # 清除重复并限制数量
+                targets = list(dict.fromkeys([t for t in targets if t]))  # 去重且保持顺序
+                can_kill_three = getattr(self, 'po_skipped_last_night', False)
+                max_targets = 3 if can_kill_three else 1
+                targets = targets[:max_targets]
+                
+                for t in targets:
+                    t_player = next((p for p in self.players if p["id"] == t), None)
+                    if t_player:
+                        self.demon_kills.append({
+                            "killer_id": player_id,
+                            "target_id": t,
+                            "killer_name": player['name'] if player else '未知',
+                            "target_name": t_player['name'],
+                            "kill_type": "po"
+                        })
+                        self.add_log(f"[夜间] {player['name']} (珀) 选择击杀 {t_player['name']}", "night")
+                
+                # 重置状态
+                self.po_skipped_last_night = False
         
         # 处理投毒类行动
         elif action_type == "poison" and target:
@@ -499,6 +630,29 @@ class Game:
                 player["butler_master_id"] = target
                 player["butler_master_name"] = target_player["name"]
                 self.add_log(f"[夜间] {player['name']} (管家) 选择 {target_player['name']} 作为主人", "night")
+        
+        # 更新日期: 2026-01-05 - 驱魔人选择目标
+        elif action_type == "exorcist" and target:
+            if target_player and player:
+                # 记录驱魔人选择的目标
+                if not hasattr(self, 'exorcist_previous_targets'):
+                    self.exorcist_previous_targets = []
+                
+                # 将目标添加到之前选过的列表
+                self.exorcist_previous_targets.append(target)
+                
+                # 检查驱魔人是否醉酒/中毒
+                is_affected = player.get("drunk") or player.get("poisoned")
+                
+                if not is_affected:
+                    # 检查目标是否是恶魔
+                    if target_player.get("role_type") == "demon":
+                        self.demon_exorcised_tonight = True
+                        self.add_log(f"[夜间] {player['name']} (驱魔人) 选择了 {target_player['name']}，恶魔今晚无法行动！", "night")
+                    else:
+                        self.add_log(f"[夜间] {player['name']} (驱魔人) 选择了 {target_player['name']}，但目标不是恶魔", "night")
+                else:
+                    self.add_log(f"[夜间] {player['name']} (驱魔人) 选择了 {target_player['name']}（醉酒/中毒，能力无效）", "night")
         
         # 处理跳过行动
         elif action_type == "skip":
@@ -648,8 +802,21 @@ class Game:
         for death in self.night_deaths:
             player = next((p for p in self.players if p["id"] == death["player_id"]), None)
             if player:
-                player["alive"] = False
-                self.add_log(f"{player['name']} 在夜间死亡 ({death['cause']})", "death")
+                # 更新日期: 2026-01-05 - 僵怖假死逻辑
+                # 检查是否是僵怖的第一次死亡
+                is_zombuul = player.get("role") and player["role"].get("id") == "zombuul"
+                is_first_death = not getattr(self, 'zombuul_first_death', False)
+                is_affected = player.get("drunk") or player.get("poisoned")
+                
+                if is_zombuul and is_first_death and not is_affected:
+                    # 僵怖第一次死亡 - 假死
+                    player["appears_dead"] = True  # 看起来死了
+                    player["alive"] = True  # 但实际还活着
+                    self.zombuul_first_death = True
+                    self.add_log(f"💀 {player['name']} 在夜间死亡（僵怖假死）", "death")
+                else:
+                    player["alive"] = False
+                    self.add_log(f"{player['name']} 在夜间死亡 ({death['cause']})", "death")
         
         self.add_log(f"第 {self.day_number} 天开始", "phase")
     
@@ -788,6 +955,33 @@ class Game:
         if nomination["vote_count"] >= required_votes:
             # 记录被处决者的角色类型（用于后续检查红唇女郎）
             was_demon = nominee.get("role_type") == "demon"
+            
+            # 更新日期: 2026-01-05 - 僵怖假死逻辑（处决时）
+            # 检查是否是僵怖的第一次死亡
+            is_zombuul = nominee.get("role") and nominee["role"].get("id") == "zombuul"
+            is_first_death = not getattr(self, 'zombuul_first_death', False)
+            is_affected = nominee.get("drunk") or nominee.get("poisoned")
+            
+            if is_zombuul and is_first_death and not is_affected:
+                # 僵怖第一次被处决 - 假死
+                nominee["appears_dead"] = True  # 看起来死了
+                nominee["alive"] = True  # 但实际还活着
+                self.zombuul_first_death = True
+                nomination["status"] = "executed"
+                self.executions.append({
+                    "day": self.day_number,
+                    "executed_id": nominee["id"],
+                    "executed_name": nominee["name"],
+                    "vote_count": nomination["vote_count"],
+                    "required_votes": required_votes
+                })
+                self.add_log(f"💀 {nominee['name']} 被处决（僵怖假死）", "execution")
+                return {
+                    "success": True, 
+                    "executed": True, 
+                    "player": nominee,
+                    "zombuul_fake_death": True
+                }
             
             nominee["alive"] = False
             nomination["status"] = "executed"
@@ -1485,8 +1679,21 @@ def start_night(game_id):
     
     # 定义角色的行动类型
     def get_action_type(role_id, role_type):
-        # 恶魔类 - 击杀
-        demon_roles = ["imp", "zombuul", "shabaloth", "po", "fang_gu", "vigormortis", "no_dashii", "vortox"]
+        # 更新日期: 2026-01-05 - 添加僵怖、沙巴洛斯、珀的特殊行动类型
+        # 僵怖 - 特殊击杀（需要判断是否有人死亡）
+        if role_id == "zombuul":
+            return "zombuul_kill"
+        
+        # 沙巴洛斯 - 每晚杀两人 + 可复活
+        if role_id == "shabaloth":
+            return "shabaloth_kill"
+        
+        # 珀 - 上晚不杀则本晚杀三人
+        if role_id == "po":
+            return "po_kill"
+        
+        # 普通恶魔类 - 击杀
+        demon_roles = ["imp", "fang_gu", "vigormortis", "no_dashii", "vortox"]
         if role_id in demon_roles:
             return "kill"
         
@@ -1531,6 +1738,11 @@ def start_night(game_id):
         # 管家 - 选择主人
         if role_id == "butler":
             return "butler_master"
+        
+        # 更新日期: 2026-01-05 - 驱魔人行动类型
+        # 驱魔人 - 选择目标（不能选之前选过的）
+        if role_id == "exorcist":
+            return "exorcist"
         
         # 首夜信息类
         first_night_info = ["washerwoman", "librarian", "investigator", "chef", "clockmaker"]
@@ -1839,6 +2051,159 @@ def revive_player(game_id):
         return jsonify({"success": True})
     
     return jsonify({"success": False, "error": "无效的玩家"})
+
+# 更新日期: 2026-01-05 - 杀手白天能力
+@app.route('/api/game/<game_id>/slayer_ability', methods=['POST'])
+def slayer_ability(game_id):
+    """杀手使用白天能力"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    data = request.json
+    game = games[game_id]
+    slayer_id = data.get('slayer_id')
+    target_id = data.get('target_id')
+    
+    # 找到杀手
+    slayer = next((p for p in game.players if p["id"] == slayer_id), None)
+    if not slayer:
+        return jsonify({"error": "无效的杀手玩家"}), 400
+    
+    # 检查是否是杀手角色
+    if not slayer.get("role") or slayer["role"].get("id") != "slayer":
+        return jsonify({"error": "该玩家不是杀手"}), 400
+    
+    # 检查杀手是否存活
+    if not slayer["alive"]:
+        return jsonify({"error": "杀手已死亡"}), 400
+    
+    # 检查能力是否已使用
+    if slayer.get("ability_used"):
+        return jsonify({"error": "杀手的能力已使用过"}), 400
+    
+    # 找到目标
+    target = next((p for p in game.players if p["id"] == target_id), None)
+    if not target:
+        return jsonify({"error": "无效的目标玩家"}), 400
+    
+    # 检查目标是否存活
+    if not target["alive"]:
+        return jsonify({"error": "目标玩家已死亡"}), 400
+    
+    # 标记能力已使用
+    slayer["ability_used"] = True
+    
+    # 检查杀手是否醉酒或中毒（能力无效）
+    is_affected = slayer.get("drunk") or slayer.get("poisoned")
+    
+    # 检查目标是否是恶魔
+    is_demon = target.get("role_type") == "demon"
+    
+    result = {
+        "success": True,
+        "slayer_name": slayer["name"],
+        "target_name": target["name"],
+        "ability_used": True
+    }
+    
+    if is_affected:
+        # 杀手醉酒/中毒，能力无效，但仍然消耗
+        game.add_log(f"🗡️ {slayer['name']}（杀手）公开选择了 {target['name']}，但能力无效（醉酒/中毒）", "ability")
+        result["target_died"] = False
+        result["reason"] = "杀手醉酒或中毒，能力无效"
+    elif is_demon:
+        # 目标是恶魔，死亡
+        target["alive"] = False
+        game.add_log(f"🗡️ {slayer['name']}（杀手）公开选择了 {target['name']}，{target['name']} 是恶魔，立即死亡！", "death")
+        result["target_died"] = True
+        result["game_end"] = game.check_game_end()
+    else:
+        # 目标不是恶魔，不死亡
+        game.add_log(f"🗡️ {slayer['name']}（杀手）公开选择了 {target['name']}，{target['name']} 不是恶魔，无事发生", "ability")
+        result["target_died"] = False
+        result["reason"] = "目标不是恶魔"
+    
+    return jsonify(result)
+
+# 更新日期: 2026-01-05 - 获取杀手状态
+@app.route('/api/game/<game_id>/slayer_status', methods=['GET'])
+def get_slayer_status(game_id):
+    """获取杀手能力状态"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    
+    # 找到杀手
+    slayer = next((p for p in game.players if p.get("role") and p["role"].get("id") == "slayer" and p["alive"]), None)
+    
+    if slayer:
+        return jsonify({
+            "has_slayer": True,
+            "slayer_id": slayer["id"],
+            "slayer_name": slayer["name"],
+            "ability_used": slayer.get("ability_used", False)
+        })
+    else:
+        return jsonify({
+            "has_slayer": False
+        })
+
+# 更新日期: 2026-01-05 - 获取驱魔人之前选过的目标
+@app.route('/api/game/<game_id>/exorcist_targets', methods=['GET'])
+def get_exorcist_targets(game_id):
+    """获取驱魔人之前选过的目标"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    
+    previous_targets = getattr(game, 'exorcist_previous_targets', [])
+    
+    return jsonify({
+        "previous_targets": previous_targets
+    })
+
+# 更新日期: 2026-01-05 - 获取珀的状态（是否可以杀三人）
+@app.route('/api/game/<game_id>/po_status', methods=['GET'])
+def get_po_status(game_id):
+    """获取珀的能力状态"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    
+    # 检查是否有珀
+    po = next((p for p in game.players if p.get("role") and p["role"].get("id") == "po" and p["alive"]), None)
+    
+    if po:
+        can_kill_three = getattr(game, 'po_skipped_last_night', False)
+        return jsonify({
+            "has_po": True,
+            "po_id": po["id"],
+            "po_name": po["name"],
+            "can_kill_three": can_kill_three
+        })
+    else:
+        return jsonify({
+            "has_po": False
+        })
+
+# 更新日期: 2026-01-05 - 获取沙巴洛斯可复活的目标列表
+@app.route('/api/game/<game_id>/shabaloth_revive_targets', methods=['GET'])
+def get_shabaloth_revive_targets(game_id):
+    """获取沙巴洛斯可以复活的目标"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    
+    # 获取所有死亡的玩家（可以复活）
+    dead_players = [{"id": p["id"], "name": p["name"]} for p in game.players if not p["alive"]]
+    
+    return jsonify({
+        "dead_players": dead_players
+    })
 
 
 if __name__ == '__main__':
