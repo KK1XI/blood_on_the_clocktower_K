@@ -1735,6 +1735,14 @@ def create_game():
     
     game_id = f"game_{len(games) + 1}_{int(datetime.now().timestamp())}"
     game = Game(game_id, script_id, player_count)
+    
+    # 简单的自动清理机制：如果游戏数量超过10个，删除最早创建的
+    if len(games) >= 10:
+        # 按创建时间排序（假设game_id包含时间戳或按插入顺序）
+        # Python 3.7+ 字典保持插入顺序，直接删除第一个key即可
+        oldest_game_id = next(iter(games))
+        del games[oldest_game_id]
+        
     games[game_id] = game
     
     return jsonify({
