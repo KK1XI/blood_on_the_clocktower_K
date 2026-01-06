@@ -1,26 +1,5 @@
 // WebGL 背景渲染器 - 2.5D 光照效果
 document.addEventListener('DOMContentLoaded', () => {
-    // #region agent log helper
-    const debugSession = 'debug-session';
-    const debugEndpoint = 'http://127.0.0.1:7242/ingest/47620f21-54a3-475d-b504-4c8fb3f3d76e';
-    const sendLog = (hypothesisId, location, message, data) => {
-        try {
-            fetch(debugEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sessionId: debugSession,
-                    runId: 'render-mem',
-                    hypothesisId,
-                    location,
-                    message,
-                    data,
-                    timestamp: Date.now()
-                })
-            }).catch(() => {});
-        } catch (e) { /* ignore */ }
-    };
-    // #endregion
     const canvas = document.getElementById('bg-canvas');
     if (!canvas) return;
 
@@ -29,10 +8,6 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('WebGL 不支持，回退到 CSS 背景。');
         return;
     }
-    sendLog('H-render', 'background.js:init', 'WebGL context created', {
-        canvasWidth: window.innerWidth,
-        canvasHeight: window.innerHeight
-    });
 
     // 调整画布大小以铺满全屏
     function resize() {
@@ -200,12 +175,6 @@ document.addEventListener('DOMContentLoaded', () => {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-            sendLog('H-render', 'background.js:textureLoaded', 'Texture loaded', {
-                url,
-                width: image.width,
-                height: image.height,
-                unit
-            });
         };
         image.src = url;
         return texture;
@@ -232,7 +201,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 渲染循环
-    let firstFrameLogged = false;
     function render() {
         gl.useProgram(program);
 
@@ -243,13 +211,6 @@ document.addEventListener('DOMContentLoaded', () => {
         gl.uniform1i(uRoughnessMap, 2);
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        if (!firstFrameLogged) {
-            firstFrameLogged = true;
-            sendLog('H-render', 'background.js:render', 'First frame rendered', {
-                canvasWidth: canvas.width,
-                canvasHeight: canvas.height
-            });
-        }
         requestAnimationFrame(render);
     }
     render();
