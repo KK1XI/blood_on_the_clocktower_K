@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         uniform sampler2D u_colorMap;
         uniform sampler2D u_normalMap;
+        uniform sampler2D u_roughnessMap;
         uniform vec2 u_resolution;
         uniform vec2 u_mouse;
         
@@ -49,12 +50,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // 纹理平铺（在屏幕高度方向重复 1.0 次）
             vec2 tiledUV = uv * vec2(1.0 * ratio.x, 1.0);
             
-            // 采样纹理
+            // 采样纹理：颜色、法线、粗糙度
             vec4 color = texture2D(u_colorMap, tiledUV);
             vec4 normalSample = texture2D(u_normalMap, tiledUV);
+            vec4 roughnessSample = texture2D(u_roughnessMap, tiledUV);
             
             // 将法线数据从 [0,1] 解包为 [-1,1]
             vec3 normal = normalize(normalSample.rgb * 2.0 - 1.0);
+            
+            // 提取粗糙度值（通常存储在 R 通道或作为灰度值）
+            float roughness = roughnessSample.r;
             
             // 计算光照方向
             // 鼠标在屏幕像素坐标系中，我们将其归一化
@@ -71,12 +76,22 @@ document.addEventListener('DOMContentLoaded', () => {
             // 从像素指向光源的向量
             vec3 lightDir = normalize(lightPos - pixelPos);
             
+            // 视图方向（假设摄像机在 Z 轴上看向下方）
+            vec3 viewDir = vec3(0.0, 0.0, 1.0);
+            
             // 环境光（基础亮度）
             float ambient = 0.5;
             
             // 漫反射光（兰伯特余弦定律 / 点积）
-            // 对于 2D 效果我们主要关注法线 XY 分量的影响，但正确的 Z 分量也有帮助
             float diffuse = max(dot(normal, lightDir), 0.0);
+            
+            // 镜面反射（Phong 模型，粗糙度影响高光强度）
+            vec3 halfDir = normalize(lightDir + viewDir);
+            float specAngle = max(dot(normal, halfDir), 0.0);
+            // 光泽度与粗糙度反向相关：粗糙度高 → 光泽度低，高光弱化
+            float glossiness = 1.0 - roughness;
+            float shininess = pow(2.0, glossiness * 7.0) + 1.0; // 范围 2.0 - 129.0
+            float specular = pow(specAngle, shininess) * glossiness;
             
             // 距离衰减（光线随距离减弱）
             float dist = distance(vec2(mouseNorm.x * ratio.x, mouseNorm.y), vec2(uv.x * ratio.x, uv.y));
@@ -84,7 +99,9 @@ document.addEventListener('DOMContentLoaded', () => {
             float attenuation = 1.0 / (1.0 + dist * dist * 2.0);
             
             // 最终光照强度
-            vec3 light = vec3(ambient + diffuse * attenuation * 2.0); // 2.0 是光照功率
+            // 漫反射 + 镜面反射（根据粗糙度调节权重）
+            float specWeight = mix(0.5, 0.0, roughness); // 粗糙表面高光弱化
+            vec3 light = vec3(ambient + (diffuse * 2.0 + specular * specWeight) * attenuation);
             
             // 暗角效果（压暗角落）
             float vignette = 1.0 - length((uv - 0.5) * vec2(1.0, u_resolution.y/u_resolution.x)) * 0.5;
@@ -165,12 +182,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadTexture('/static/images/textures/leather-color.png', 0);
     loadTexture('/static/images/textures/leather-normal.png', 1);
+    loadTexture('/static/images/textures/leather-roughness.png', 2);
 
     // 获取 Uniform 变量位置
     const uResolution = gl.getUniformLocation(program, "u_resolution");
     const uMouse = gl.getUniformLocation(program, "u_mouse");
     const uColorMap = gl.getUniformLocation(program, "u_colorMap");
     const uNormalMap = gl.getUniformLocation(program, "u_normalMap");
+    const uRoughnessMap = gl.getUniformLocation(program, "u_roughnessMap");
 
     // 鼠标追踪
     let mouseX = window.innerWidth / 2;
@@ -189,6 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
         gl.uniform2f(uMouse, mouseX, mouseY);
         gl.uniform1i(uColorMap, 0);
         gl.uniform1i(uNormalMap, 1);
+        gl.uniform1i(uRoughnessMap, 2);
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         requestAnimationFrame(render);
