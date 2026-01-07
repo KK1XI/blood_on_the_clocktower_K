@@ -176,13 +176,35 @@ document.addEventListener('DOMContentLoaded', () => {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
         };
+        image.onerror = function() {
+            console.warn(`纹理加载失败: ${url}`);
+        };
         image.src = url;
         return texture;
     }
 
-    loadTexture('/static/images/textures/leather-color.png', 0);
-    loadTexture('/static/images/textures/leather-normal.png', 1);
-    loadTexture('/static/images/textures/leather-roughness.png', 2);
+    // 加载纹理集合（颜色、法线、粗糙度）
+    function loadTextureSet(basename) {
+        console.log(`📦 加载纹理集: ${basename}`);
+        
+        // 根据纹理集名称自动选择格式：
+        // - leather: PNG 格式（旧格式）
+        // - wood: WebP 格式（新优化格式）
+        const format = (basename === 'leather') ? 'png' : 'webp';
+        
+        loadTexture(`/static/images/textures/${basename}-color.${format}`, 0);
+        loadTexture(`/static/images/textures/${basename}-normal.${format}`, 1);
+        loadTexture(`/static/images/textures/${basename}-roughness.${format}`, 2);
+    }
+
+    // 默认加载皮革纹理（最底层无限延伸背景）
+    loadTextureSet('leather');
+    
+    // 暴露全局函数以便在开发者工具中测试
+    window.switchTexture = function(name) {
+        console.log(`🔄 切换纹理到: ${name}`);
+        loadTextureSet(name);
+    };
 
     // 获取 Uniform 变量位置
     const uResolution = gl.getUniformLocation(program, "u_resolution");

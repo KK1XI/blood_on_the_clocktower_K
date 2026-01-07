@@ -190,12 +190,19 @@ body {
     width: 100%;
 }
 
-/* ===== Panel ===== */
+/* ===== Panel（中间层木纹容器）===== */
 .panel {
-    background: var(--bg-card);
+    /* 木纹背景纹理（Level 2 中间层）*/
+    background-image: 
+        linear-gradient(rgba(15, 15, 15, 0.5), rgba(15, 15, 15, 0.5)),
+        url('/static/images/textures/wood-color.webp');
+    background-size: cover, 400px 400px; /* 适度平铺，保持木纹纹理清晰 */
+    background-repeat: no-repeat, repeat;
+    background-position: center;
+    
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(139, 0, 0, 0.2);
-    box-shadow: var(--shadow-lg);
+    border: 2px solid rgba(139, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg), inset 0 0 50px rgba(0, 0, 0, 0.7);
     overflow: hidden;
 }
 
