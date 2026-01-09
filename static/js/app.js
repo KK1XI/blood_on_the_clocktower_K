@@ -1471,6 +1471,112 @@ async function handleNightAction(index) {
                 </p>
             </div>
         `;
+    } else if (item.action_type === 'devils_advocate') {
+        // 更新日期: 2026-01-05 - 恶魔代言人行动 UI
+        // 恶魔代言人 - 选择目标（不能选之前选过的），保护免于处决
+        const advocateData = await apiCall(`/api/game/${gameState.gameId}/devils_advocate_targets`);
+        const previousTargets = advocateData.previous_targets || [];
+        
+        // 过滤掉之前选过的目标
+        const availableTargets = alivePlayers.filter(p => 
+            p.id !== item.player_id && !previousTargets.includes(p.id)
+        );
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-minion); margin-bottom: var(--spacing-md);">😈 恶魔代言人 - 保护玩家</h5>
+                ${previousTargets.length > 0 ? `
+                <div style="padding: var(--spacing-sm); background: rgba(100, 100, 100, 0.2); border-radius: var(--radius-sm); margin-bottom: var(--spacing-md);">
+                    <span style="color: var(--text-muted);">之前保护过的玩家: ${previousTargets.map(id => {
+                        const p = gameState.players.find(player => player.id === id);
+                        return p ? p.name : '未知';
+                    }).join(', ')}</span>
+                </div>
+                ` : ''}
+                <div class="target-select-group">
+                    <label>选择一名玩家（明天处决时不会死亡）:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value);">
+                        <option value="">-- 选择目标 --</option>
+                        ${availableTargets.map(p => 
+                            `<option value="${p.id}">${p.name} (${p.role?.name || '未知'})</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ${availableTargets.length === 0 ? `
+                <div style="padding: var(--spacing-md); background: rgba(243, 156, 18, 0.2); border: 1px solid var(--color-drunk); border-radius: var(--radius-md); margin-top: var(--spacing-md);">
+                    <p style="color: var(--color-drunk);">⚠️ 没有可选择的目标（所有存活玩家都已被选过）</p>
+                </div>
+                ` : ''}
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    你选择的玩家明天被处决时不会死亡。<br>
+                    你不能选择之前选过的玩家。
+                </p>
+            </div>
+        `;
+    } else if (item.action_type === 'pit_hag') {
+        // 更新日期: 2026-01-05 - 麻脸巫婆行动 UI
+        const pitHagData = await apiCall(`/api/game/${gameState.gameId}/pit_hag_roles`);
+        const availableRoles = pitHagData.available_roles || [];
+        
+        // 按类型分组显示
+        const townsfolkRoles = availableRoles.filter(r => r.type === 'townsfolk');
+        const outsiderRoles = availableRoles.filter(r => r.type === 'outsider');
+        const minionRoles = availableRoles.filter(r => r.type === 'minion');
+        const demonRoles = availableRoles.filter(r => r.type === 'demon');
+        
+        actionUI = `
+            <div class="night-action-panel">
+                <h5 style="color: var(--color-minion); margin-bottom: var(--spacing-md);">🧙‍♀️ 麻脸巫婆 - 改变角色</h5>
+                <p style="color: var(--text-muted); margin-bottom: var(--spacing-md); font-size: 0.9rem;">
+                    选择一名玩家和一个不在场的角色，该玩家将变成那个角色。
+                </p>
+                <div class="target-select-group">
+                    <label>选择目标玩家:</label>
+                    <select id="nightActionTarget" class="form-select" onchange="updateNightActionTarget(this.value); updatePitHagPreview();">
+                        <option value="">-- 选择玩家 --</option>
+                        ${alivePlayers.filter(p => p.id !== item.player_id).map(p => 
+                            `<option value="${p.id}">${p.name} (当前: ${p.role?.name || '未知'})</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="target-select-group" style="margin-top: var(--spacing-md);">
+                    <label>选择新角色 (不在场的角色):</label>
+                    <select id="pitHagRoleSelect" class="form-select" onchange="updatePitHagPreview();">
+                        <option value="">-- 选择角色 --</option>
+                        ${townsfolkRoles.length > 0 ? `
+                        <optgroup label="镇民">
+                            ${townsfolkRoles.map(r => `<option value="${r.id}" data-type="townsfolk">${r.name}</option>`).join('')}
+                        </optgroup>
+                        ` : ''}
+                        ${outsiderRoles.length > 0 ? `
+                        <optgroup label="外来者">
+                            ${outsiderRoles.map(r => `<option value="${r.id}" data-type="outsider">${r.name}</option>`).join('')}
+                        </optgroup>
+                        ` : ''}
+                        ${minionRoles.length > 0 ? `
+                        <optgroup label="爪牙">
+                            ${minionRoles.map(r => `<option value="${r.id}" data-type="minion">${r.name}</option>`).join('')}
+                        </optgroup>
+                        ` : ''}
+                        ${demonRoles.length > 0 ? `
+                        <optgroup label="恶魔">
+                            ${demonRoles.map(r => `<option value="${r.id}" data-type="demon">${r.name}</option>`).join('')}
+                        </optgroup>
+                        ` : ''}
+                    </select>
+                </div>
+                <div id="pitHagPreview" style="margin-top: var(--spacing-md); padding: var(--spacing-md); background: rgba(0,0,0,0.3); border-radius: var(--radius-md); display: none;">
+                    <p id="pitHagPreviewText" style="color: var(--color-gold);"></p>
+                </div>
+                <div id="pitHagDemonWarning" style="display: none; margin-top: var(--spacing-md); padding: var(--spacing-md); background: rgba(139, 0, 0, 0.3); border: 1px solid var(--color-blood); border-radius: var(--radius-md);">
+                    <p style="color: var(--color-blood);">⚠️ 你正在创造一个新的恶魔！当晚的死亡将由说书人决定。</p>
+                </div>
+                <p style="margin-top: var(--spacing-sm); font-size: 0.85rem; color: var(--text-muted);">
+                    只能选择当前不在场的角色。<br>
+                    如果创造了新恶魔，当晚的死亡由说书人决定。
+                </p>
+            </div>
+        `;
     } else if (item.action_type === 'info_first_night') {
         // 首夜信息类 - 自动生成信息
         const actionPlayer = gameState.players.find(p => p.id === item.player_id);
@@ -1566,6 +1672,38 @@ function updateGrandchildPreview() {
         }
     } else if (preview) {
         preview.style.display = 'none';
+    }
+}
+
+// 更新日期: 2026-01-05 - 麻脸巫婆预览
+function updatePitHagPreview() {
+    const preview = document.getElementById('pitHagPreview');
+    const previewText = document.getElementById('pitHagPreviewText');
+    const demonWarning = document.getElementById('pitHagDemonWarning');
+    const roleSelect = document.getElementById('pitHagRoleSelect');
+    
+    if (currentNightActionTarget && roleSelect && roleSelect.value) {
+        const targetPlayer = gameState.players.find(p => p.id === currentNightActionTarget);
+        const selectedOption = roleSelect.options[roleSelect.selectedIndex];
+        const roleType = selectedOption.dataset.type;
+        const roleName = selectedOption.text;
+        
+        if (targetPlayer && preview && previewText) {
+            preview.style.display = 'block';
+            previewText.innerHTML = `将把 <strong>${targetPlayer.name}</strong> (${targetPlayer.role?.name || '未知'}) 变为 <strong style="color: ${roleType === 'demon' ? 'var(--color-demon)' : roleType === 'minion' ? 'var(--color-minion)' : 'var(--color-townsfolk)'};">${roleName}</strong>`;
+            
+            // 检查是否创造恶魔
+            if (demonWarning) {
+                if (roleType === 'demon' && targetPlayer.role_type !== 'demon') {
+                    demonWarning.style.display = 'block';
+                } else {
+                    demonWarning.style.display = 'none';
+                }
+            }
+        }
+    } else {
+        if (preview) preview.style.display = 'none';
+        if (demonWarning) demonWarning.style.display = 'none';
     }
 }
 
@@ -1759,8 +1897,42 @@ async function completeNightActionWithTarget(index) {
         actionData.extra_data = { targets: targets };
     }
     
+    // 更新日期: 2026-01-05 - 麻脸巫婆特殊处理：发送新角色ID
+    if (item.action_type === 'pit_hag' && target) {
+        const roleSelect = document.getElementById('pitHagRoleSelect');
+        const newRoleId = roleSelect ? roleSelect.value : null;
+        
+        if (newRoleId) {
+            actionData.extra_data = { new_role_id: newRoleId };
+        }
+    }
+    
     // 记录夜间行动
     await apiCall(`/api/game/${gameState.gameId}/night_action`, 'POST', actionData);
+    
+    // 更新日期: 2026-01-05 - 检查莽夫效果
+    if (target) {
+        const targetPlayer = gameState.players.find(p => p.id === target);
+        if (targetPlayer && targetPlayer.role && targetPlayer.role.id === 'goon') {
+            // 目标是莽夫，触发效果
+            const goonResult = await apiCall(`/api/game/${gameState.gameId}/goon_effect`, 'POST', {
+                selector_id: item.player_id,
+                goon_id: target
+            });
+            
+            if (goonResult.success && !goonResult.already_chosen) {
+                if (goonResult.alignment_changed) {
+                    addLogEntry(`💪 ${goonResult.selector_name} 选择了莽夫 ${goonResult.goon_name}，${goonResult.selector_name} 喝醉了，莽夫变为${goonResult.new_alignment}阵营`, 'night');
+                    // 更新本地状态
+                    const selector = gameState.players.find(p => p.id === item.player_id);
+                    if (selector) {
+                        selector.drunk = true;
+                    }
+                    targetPlayer.goon_alignment = goonResult.new_alignment === '善良' ? 'good' : 'evil';
+                }
+            }
+        }
+    }
     
     // 更新本地玩家状态
     if (item.action_type === 'protect' && target) {
@@ -1877,6 +2049,33 @@ async function completeNightActionWithTarget(index) {
         if (targetPlayer) {
             targetPlayer.is_butler_master = true;
         }
+    } else if (item.action_type === 'pit_hag' && target) {
+        // 更新日期: 2026-01-05 - 麻脸巫婆 - 更新目标角色
+        const roleSelect = document.getElementById('pitHagRoleSelect');
+        const newRoleId = roleSelect ? roleSelect.value : null;
+        
+        if (newRoleId) {
+            const targetPlayer = gameState.players.find(p => p.id === target);
+            const selectedOption = roleSelect.options[roleSelect.selectedIndex];
+            const roleType = selectedOption.dataset.type;
+            const roleName = selectedOption.text;
+            
+            if (targetPlayer) {
+                const oldRoleName = targetPlayer.role?.name || '未知';
+                const oldRoleType = targetPlayer.role_type;
+                
+                // 更新角色
+                targetPlayer.role = { id: newRoleId, name: roleName };
+                targetPlayer.role_type = roleType;
+                
+                // 检查是否创造了新恶魔
+                if (roleType === 'demon' && oldRoleType !== 'demon') {
+                    addLogEntry(`🧙‍♀️ 麻脸巫婆将 ${targetPlayer.name} 从 ${oldRoleName} 变为 ${roleName}！⚠️ 创造了新恶魔！`, 'night');
+                } else {
+                    addLogEntry(`🧙‍♀️ 麻脸巫婆将 ${targetPlayer.name} 从 ${oldRoleName} 变为 ${roleName}`, 'night');
+                }
+            }
+        }
     }
     
     gameState.currentNightIndex = index + 1;
@@ -1965,6 +2164,9 @@ async function startDay() {
         showGameEnd(result.game_end);
         return;
     }
+    
+    // 更新日期: 2026-01-05 - 检查月之子触发（夜间死亡）
+    setTimeout(() => checkMoonchildTrigger(), 500);
     
     updatePhaseIndicator('day');
     updateDayNightIndicator();
@@ -2429,7 +2631,7 @@ function updateVoteCount(nomination) {
     document.getElementById('requiredVotes').textContent = Math.floor(alivePlayers.length / 2) + 1;
 }
 
-// 更新日期: 2026-01-02 - 修复圣徒能力，添加红唇女郎处决后检测
+// 更新日期: 2026-01-05 - 添加恶魔代言人保护和和平主义者干预
 async function handleExecute() {
     if (!currentNominationId) return;
     
@@ -2444,13 +2646,52 @@ async function handleExecute() {
     
     const nomination = gameState.nominations.find(n => n.id === currentNominationId);
     
+    // 更新日期: 2026-01-05 - 恶魔代言人保护检查
+    if (result.protected_by_devils_advocate) {
+        nomination.status = 'protected';
+        addLogEntry(`🛡️ ${result.player.name} 被恶魔代言人保护，免于处决！`, 'game_event');
+        closeModal('voteModal');
+        renderNominations();
+        renderPlayerCircle();
+        updatePlayerSelects();
+        return;
+    }
+    
+    // 更新日期: 2026-01-05 - 弄臣保护检查
+    if (result.fool_saved) {
+        nomination.status = 'fool_saved';
+        addLogEntry(`🃏 ${result.player.name} (弄臣) 首次死亡被避免！`, 'game_event');
+        closeModal('voteModal');
+        renderNominations();
+        renderPlayerCircle();
+        updatePlayerSelects();
+        return;
+    }
+    
+    // 更新日期: 2026-01-05 - 和平主义者干预
+    if (result.pacifist_intervention) {
+        // 显示和平主义者干预弹窗
+        showPacifistModal(result);
+        return;
+    }
+    
     if (result.executed) {
         nomination.status = 'executed';
         const player = gameState.players.find(p => p.id === nomination.nominee_id);
-        if (player) {
+        if (player && !result.zombuul_fake_death) {
             player.alive = false;
         }
-        addLogEntry(`${nomination.nominee_name} 被处决`, 'execution');
+        
+        // 更新日期: 2026-01-05 - 僵怖假死显示
+        if (result.zombuul_fake_death) {
+            const zombuul = gameState.players.find(p => p.id === nomination.nominee_id);
+            if (zombuul) {
+                zombuul.appears_dead = true;
+            }
+            addLogEntry(`💀 ${nomination.nominee_name} 被处决（看起来死了...）`, 'execution');
+        } else {
+            addLogEntry(`${nomination.nominee_name} 被处决`, 'execution');
+        }
         
         // 检查圣徒被处决
         if (result.saint_executed) {
@@ -2481,7 +2722,238 @@ async function handleExecute() {
         {ended: true, winner: 'evil', reason: '圣徒被处决'} : null);
     if (gameEnd && gameEnd.ended) {
         showGameEnd(gameEnd);
+        return;
     }
+    
+    // 更新日期: 2026-01-05 - 检查月之子触发
+    if (result.moonchild_triggered) {
+        setTimeout(() => checkMoonchildTrigger(), 500);
+    }
+}
+
+// 更新日期: 2026-01-05 - 和平主义者干预弹窗
+function showPacifistModal(data) {
+    const modal = document.getElementById('pacifistModal') || createPacifistModal();
+    
+    document.getElementById('pacifistNomineeName').textContent = data.nominee_name;
+    document.getElementById('pacifistName').textContent = data.pacifist_name;
+    document.getElementById('pacifistVoteInfo').textContent = `票数: ${data.vote_count}/${data.required_votes}`;
+    
+    // 存储数据供后续使用
+    modal.dataset.nominationId = data.nomination_id;
+    modal.dataset.nomineeId = data.nominee_id;
+    
+    openModal('pacifistModal');
+}
+
+function createPacifistModal() {
+    const modal = document.createElement('div');
+    modal.id = 'pacifistModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>☮️ 和平主义者干预</h3>
+                <button class="close-btn" onclick="closePacifistModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: var(--spacing-lg);">
+                    <p style="font-size: 1.1rem; margin-bottom: var(--spacing-sm);">
+                        <strong id="pacifistNomineeName"></strong> 将被处决
+                    </p>
+                    <p id="pacifistVoteInfo" style="color: var(--text-muted);"></p>
+                </div>
+                <div style="padding: var(--spacing-md); background: rgba(39, 174, 96, 0.2); border-radius: var(--radius-md); margin-bottom: var(--spacing-lg);">
+                    <p>场上存在 <strong id="pacifistName"></strong>（和平主义者）</p>
+                    <p style="color: var(--color-alive); margin-top: var(--spacing-sm);">
+                        和平主义者的能力：如果善良玩家因处决而死亡，可能改为他存活。
+                    </p>
+                </div>
+                <p style="text-align: center; margin-bottom: var(--spacing-md);">
+                    说书人决定该玩家是否存活：
+                </p>
+                <div style="display: flex; gap: var(--spacing-md); justify-content: center;">
+                    <button class="btn btn-success" onclick="pacifistDecision(true)" style="padding: 12px 24px;">
+                        ✓ 玩家存活
+                    </button>
+                    <button class="btn btn-danger" onclick="pacifistDecision(false)" style="padding: 12px 24px;">
+                        ✗ 玩家死亡
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+}
+
+async function pacifistDecision(survives) {
+    const modal = document.getElementById('pacifistModal');
+    const nominationId = parseInt(modal.dataset.nominationId);
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/pacifist_decision`, 'POST', {
+        nomination_id: nominationId,
+        survives: survives
+    });
+    
+    if (!result.success) {
+        alert(result.error || '操作失败');
+        return;
+    }
+    
+    const nomination = gameState.nominations.find(n => n.id === nominationId);
+    
+    if (survives) {
+        nomination.status = 'pacifist_saved';
+        addLogEntry(`☮️ ${nomination.nominee_name} 被和平主义者的能力保护，存活下来！`, 'game_event');
+    } else {
+        nomination.status = 'executed';
+        const player = gameState.players.find(p => p.id === nomination.nominee_id);
+        if (player) {
+            player.alive = false;
+        }
+        addLogEntry(`${nomination.nominee_name} 被处决（和平主义者未能阻止）`, 'execution');
+    }
+    
+    closePacifistModal();
+    closeModal('voteModal');
+    renderNominations();
+    renderPlayerCircle();
+    updatePlayerSelects();
+    
+    // 检查游戏结束
+    if (result.game_end && result.game_end.ended) {
+        showGameEnd(result.game_end);
+    }
+}
+
+function closePacifistModal() {
+    closeModal('pacifistModal');
+}
+
+// 更新日期: 2026-01-05 - 月之子能力弹窗
+async function checkMoonchildTrigger() {
+    const result = await apiCall(`/api/game/${gameState.gameId}/check_moonchild`);
+    if (result.has_moonchild) {
+        showMoonchildModal(result);
+    }
+}
+
+function showMoonchildModal(data) {
+    const modal = document.getElementById('moonchildModal') || createMoonchildModal();
+    
+    document.getElementById('moonchildName').textContent = data.moonchild_name;
+    
+    // 生成存活玩家选项
+    const selectHtml = data.alive_players.map(p => 
+        `<option value="${p.id}">${p.name}</option>`
+    ).join('');
+    document.getElementById('moonchildTargetSelect').innerHTML = 
+        `<option value="">-- 不使用能力 --</option>` + selectHtml;
+    
+    // 存储数据供后续使用
+    modal.dataset.moonchildId = data.moonchild_id;
+    
+    openModal('moonchildModal');
+}
+
+function createMoonchildModal() {
+    const modal = document.createElement('div');
+    modal.id = 'moonchildModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>🌙 月之子能力</h3>
+                <button class="close-btn" onclick="closeMoonchildModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: var(--spacing-lg);">
+                    <p style="font-size: 1.1rem; color: var(--color-outsider);">
+                        <strong id="moonchildName"></strong> (月之子) 已死亡
+                    </p>
+                </div>
+                <div style="padding: var(--spacing-md); background: rgba(128, 0, 128, 0.2); border-radius: var(--radius-md); margin-bottom: var(--spacing-lg);">
+                    <p style="color: var(--color-outsider);">
+                        月之子的能力：当你得知自己死亡时，你可以公开选择一名存活玩家。如果他是善良的，他死亡。
+                    </p>
+                </div>
+                <div class="target-select-group">
+                    <label>选择一名存活玩家:</label>
+                    <select id="moonchildTargetSelect" class="form-select">
+                        <option value="">-- 不使用能力 --</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: var(--spacing-md); justify-content: center; margin-top: var(--spacing-lg);">
+                    <button class="btn btn-primary" onclick="useMoonchildAbility()" style="padding: 12px 24px;">
+                        🌙 使用能力
+                    </button>
+                    <button class="btn btn-secondary" onclick="skipMoonchildAbility()" style="padding: 12px 24px;">
+                        跳过
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+}
+
+async function useMoonchildAbility() {
+    const modal = document.getElementById('moonchildModal');
+    const moonchildId = parseInt(modal.dataset.moonchildId);
+    const targetSelect = document.getElementById('moonchildTargetSelect');
+    const targetId = targetSelect.value ? parseInt(targetSelect.value) : null;
+    
+    const result = await apiCall(`/api/game/${gameState.gameId}/moonchild_ability`, 'POST', {
+        moonchild_id: moonchildId,
+        target_id: targetId
+    });
+    
+    if (!result.success) {
+        alert(result.error || '操作失败');
+        return;
+    }
+    
+    if (result.used) {
+        if (result.target_died) {
+            addLogEntry(`🌙 月之子选择了 ${result.target_name}（善良玩家），${result.target_name} 死亡！`, 'death');
+            const target = gameState.players.find(p => p.name === result.target_name);
+            if (target) {
+                target.alive = false;
+            }
+        } else {
+            addLogEntry(`🌙 月之子选择了 ${result.target_name}（邪恶玩家），目标存活`, 'game_event');
+        }
+    } else {
+        addLogEntry(`🌙 月之子选择不使用能力`, 'game_event');
+    }
+    
+    closeMoonchildModal();
+    renderPlayerCircle();
+    updatePlayerSelects();
+    
+    // 检查游戏结束
+    if (result.game_end && result.game_end.ended) {
+        showGameEnd(result.game_end);
+    }
+}
+
+async function skipMoonchildAbility() {
+    const modal = document.getElementById('moonchildModal');
+    const moonchildId = parseInt(modal.dataset.moonchildId);
+    
+    await apiCall(`/api/game/${gameState.gameId}/moonchild_ability`, 'POST', {
+        moonchild_id: moonchildId,
+        target_id: null
+    });
+    
+    addLogEntry(`🌙 月之子选择不使用能力`, 'game_event');
+    closeMoonchildModal();
+}
+
+function closeMoonchildModal() {
+    closeModal('moonchildModal');
 }
 
 // ===== 玩家详情 =====
