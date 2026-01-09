@@ -38,6 +38,9 @@ class Game:
         # 更新日期: 2026-01-05 - 恶魔代言人追踪
         self.devils_advocate_previous_targets = []  # 恶魔代言人之前选过的目标
         self.devils_advocate_protected = None  # 今天被恶魔代言人保护的玩家ID
+        # 更新日期: 2026-01-05 - 弄臣、月之子、莽夫追踪
+        self.goon_chosen_tonight = False  # 莽夫今晚是否已被选择
+        self.pending_moonchild = None  # 等待处理的月之子（死亡时触发）
         
     def to_dict(self):
         return {
@@ -288,6 +291,8 @@ class Game:
         self.demon_kills = []  # 恶魔选择的击杀目标
         # 更新日期: 2026-01-05 - 重置驱魔人状态
         self.demon_exorcised_tonight = False  # 重置恶魔被驱魔状态
+        # 更新日期: 2026-01-05 - 重置莽夫状态
+        self.goon_chosen_tonight = False  # 重置莽夫今晚是否被选择
         
         # 重置所有玩家的保护状态，并检查状态过期
         for player in self.players:
@@ -678,6 +683,55 @@ class Game:
                 else:
                     self.add_log(f"[夜间] {player['name']} (恶魔代言人) 选择了 {target_player['name']}（醉酒/中毒，能力无效）", "night")
         
+        # 更新日期: 2026-01-08 - 麻脸巫婆改变角色
+        elif action_type == "pit_hag" and target:
+            if target_player and player and extra_data:
+                new_role_id = extra_data.get("new_role_id")
+                
+                # 检查麻脸巫婆是否醉酒/中毒
+                is_affected = player.get("drunk") or player.get("poisoned")
+                
+                if not is_affected and new_role_id:
+                    # 获取新角色信息
+                    new_role = self._find_role_by_id(new_role_id)
+                    new_role_type = self._get_role_type(new_role)
+                    
+                    if new_role:
+                        old_role = target_player.get("role", {})
+                        old_role_name = old_role.get("name", "未知") if old_role else "未知"
+                        old_role_type = target_player.get("role_type")
+                        
+                        # 检查是否创造了新恶魔
+                        created_demon = new_role_type == "demon" and old_role_type != "demon"
+                        
+                        # 改变目标的角色
+                        target_player["role"] = new_role
+                        target_player["role_type"] = new_role_type
+                        
+                        # 标记角色变更事件
+                        if not hasattr(self, 'pit_hag_changes'):
+                            self.pit_hag_changes = []
+                        
+                        change_info = {
+                            "target_id": target,
+                            "target_name": target_player["name"],
+                            "old_role": old_role_name,
+                            "new_role": new_role.get("name", "未知"),
+                            "created_demon": created_demon
+                        }
+                        self.pit_hag_changes.append(change_info)
+                        
+                        if created_demon:
+                            # 如果创造了新恶魔，标记需要说书人决定今晚的死亡
+                            self.pit_hag_created_demon = True
+                            self.add_log(f"[夜间] {player['name']} (麻脸巫婆) 将 {target_player['name']} 从 {old_role_name} 变为 {new_role['name']}！⚠️ 创造了新恶魔！", "night")
+                        else:
+                            self.add_log(f"[夜间] {player['name']} (麻脸巫婆) 将 {target_player['name']} 从 {old_role_name} 变为 {new_role['name']}", "night")
+                    else:
+                        self.add_log(f"[夜间] {player['name']} (麻脸巫婆) 选择的角色不存在", "night")
+                else:
+                    self.add_log(f"[夜间] {player['name']} (麻脸巫婆) 选择了目标（醉酒/中毒，能力无效）", "night")
+        
         # 处理跳过行动
         elif action_type == "skip":
             self.add_log(f"[夜间] {player['name']} 选择不行动", "night")
@@ -817,6 +871,13 @@ class Game:
                 self.add_log(f"🍵 {target_player['name']} 被茶艺师保护，无法死亡", "night")
                 continue
             
+            # 更新日期: 2026-01-05 - 弄臣保护检查（首次死亡时不会死亡）
+            if target_player.get("role") and target_player["role"].get("id") == "fool":
+                if not target_player.get("fool_used") and not target_player.get("drunk") and not target_player.get("poisoned"):
+                    target_player["fool_used"] = True
+                    self.add_log(f"🃏 {target_player['name']} (弄臣) 首次死亡被避免！", "night")
+                    continue
+            
             # 检查是否是镇长（可能由其他玩家替死）
             # 这里记录镇长被攻击，具体替死处理由 process_mayor_death 完成
             if target_player.get("role") and target_player["role"].get("id") == "mayor":
@@ -905,6 +966,13 @@ class Game:
                 else:
                     player["alive"] = False
                     self.add_log(f"{player['name']} 在夜间死亡 ({death['cause']})", "death")
+                    
+                    # 更新日期: 2026-01-05 - 月之子检查（夜间死亡时触发）
+                    if player.get("role") and player["role"].get("id") == "moonchild":
+                        if not player.get("drunk") and not player.get("poisoned"):
+                            player["moonchild_triggered"] = True
+                            self.pending_moonchild = player["id"]
+                            self.add_log(f"🌙 月之子 {player['name']} 在夜间死亡，需要选择一名玩家", "game_event")
         
         self.add_log(f"第 {self.day_number} 天开始", "phase")
     
@@ -1081,6 +1149,19 @@ class Game:
                             "nomination_id": nomination["id"]
                         }
             
+            # 更新日期: 2026-01-05 - 弄臣保护检查（首次死亡时不会死亡）
+            is_fool = nominee.get("role") and nominee["role"].get("id") == "fool"
+            if is_fool and not nominee.get("fool_used") and not nominee.get("drunk") and not nominee.get("poisoned"):
+                nominee["fool_used"] = True
+                nomination["status"] = "fool_saved"
+                self.add_log(f"🃏 {nominee['name']} (弄臣) 首次死亡被避免！", "execution")
+                return {
+                    "success": True,
+                    "executed": False,
+                    "fool_saved": True,
+                    "player": nominee
+                }
+            
             # 记录被处决者的角色类型（用于后续检查红唇女郎）
             was_demon = nominee.get("role_type") == "demon"
             
@@ -1141,8 +1222,23 @@ class Game:
                 else:
                     self.add_log(f"[系统] 圣徒 {nominee['name']} 醉酒/中毒，能力失效", "info")
             
+            # 更新日期: 2026-01-05 - 月之子检查（处决死亡时触发）
+            if nominee_role_id == "moonchild":
+                is_affected = nominee.get("drunk") or nominee.get("poisoned")
+                if not is_affected:
+                    nominee["moonchild_triggered"] = True
+                    self.pending_moonchild = nominee["id"]
+                    self.add_log(f"🌙 月之子 {nominee['name']} 被处决，需要选择一名玩家", "game_event")
+            
             # 如果被处决的是恶魔，检查红唇女郎能力
             result = {"success": True, "executed": True, "player": nominee}
+            
+            # 添加月之子触发信息
+            if nominee.get("moonchild_triggered"):
+                result["moonchild_triggered"] = True
+                result["moonchild_id"] = nominee["id"]
+                result["moonchild_name"] = nominee["name"]
+            
             if was_demon:
                 game_end = self.check_game_end()
                 if game_end.get("scarlet_woman_triggered"):
@@ -1735,14 +1831,13 @@ def create_game():
     
     game_id = f"game_{len(games) + 1}_{int(datetime.now().timestamp())}"
     game = Game(game_id, script_id, player_count)
-    
     # 简单的自动清理机制：如果游戏数量超过10个，删除最早创建的
     if len(games) >= 10:
         # 按创建时间排序（假设game_id包含时间戳或按插入顺序）
         # Python 3.7+ 字典保持插入顺序，直接删除第一个key即可
         oldest_game_id = next(iter(games))
         del games[oldest_game_id]
-        
+
     games[game_id] = game
     
     return jsonify({
@@ -1890,8 +1985,12 @@ def start_night(game_id):
         if role_id in first_night_info:
             return "info_first_night"
         
+        # 麻脸巫婆 - 选择玩家和角色，改变其角色
+        if role_id == "pit_hag":
+            return "pit_hag"
+        
         # 选择角色/能力类
-        ability_select_roles = ["philosopher", "pit_hag", "cerenovus", "witch"]
+        ability_select_roles = ["philosopher", "cerenovus", "witch"]
         if role_id in ability_select_roles:
             return "ability_select"
         
@@ -2411,6 +2510,198 @@ def pacifist_decision(game_id):
             result["game_end"] = game_end
         
         return jsonify(result)
+
+# 更新日期: 2026-01-05 - 月之子选择目标
+@app.route('/api/game/<game_id>/moonchild_ability', methods=['POST'])
+def moonchild_ability(game_id):
+    """月之子选择目标"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    data = request.json
+    game = games[game_id]
+    moonchild_id = data.get('moonchild_id')
+    target_id = data.get('target_id')
+    
+    # 找到月之子
+    moonchild = next((p for p in game.players if p["id"] == moonchild_id), None)
+    if not moonchild:
+        return jsonify({"error": "无效的月之子玩家"}), 400
+    
+    # 检查是否是月之子角色
+    if not moonchild.get("role") or moonchild["role"].get("id") != "moonchild":
+        return jsonify({"error": "该玩家不是月之子"}), 400
+    
+    # 清除触发标记
+    moonchild["moonchild_triggered"] = False
+    game.pending_moonchild = None
+    
+    # 如果没有选择目标，则放弃能力
+    if not target_id:
+        game.add_log(f"🌙 月之子 {moonchild['name']} 选择不使用能力", "game_event")
+        return jsonify({"success": True, "used": False})
+    
+    # 找到目标
+    target = next((p for p in game.players if p["id"] == target_id), None)
+    if not target:
+        return jsonify({"error": "无效的目标玩家"}), 400
+    
+    # 检查目标是否存活
+    if not target["alive"]:
+        return jsonify({"error": "目标玩家已死亡"}), 400
+    
+    # 检查目标是否是善良的
+    target_is_good = target.get("role_type") in ["townsfolk", "outsider"]
+    
+    if target_is_good:
+        # 善良玩家被选中，死亡
+        target["alive"] = False
+        game.add_log(f"🌙 月之子 {moonchild['name']} 选择了 {target['name']}（善良玩家），{target['name']} 死亡！", "death")
+        
+        # 检查游戏结束
+        game_end = game.check_game_end()
+        
+        return jsonify({
+            "success": True,
+            "used": True,
+            "target_died": True,
+            "target_name": target["name"],
+            "game_end": game_end
+        })
+    else:
+        # 邪恶玩家被选中，不死亡
+        game.add_log(f"🌙 月之子 {moonchild['name']} 选择了 {target['name']}（邪恶玩家），目标存活", "game_event")
+        return jsonify({
+            "success": True,
+            "used": True,
+            "target_died": False,
+            "target_name": target["name"]
+        })
+
+# 更新日期: 2026-01-05 - 检查是否有待处理的月之子
+@app.route('/api/game/<game_id>/check_moonchild', methods=['GET'])
+def check_moonchild(game_id):
+    """检查是否有月之子需要选择目标"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    
+    pending_id = getattr(game, 'pending_moonchild', None)
+    if pending_id:
+        moonchild = next((p for p in game.players if p["id"] == pending_id), None)
+        if moonchild and moonchild.get("moonchild_triggered"):
+            alive_players = [{"id": p["id"], "name": p["name"]} for p in game.players if p["alive"]]
+            return jsonify({
+                "has_moonchild": True,
+                "moonchild_id": pending_id,
+                "moonchild_name": moonchild["name"],
+                "alive_players": alive_players
+            })
+    
+    return jsonify({"has_moonchild": False})
+
+# 更新日期: 2026-01-05 - 处理莽夫被选中的效果
+@app.route('/api/game/<game_id>/goon_effect', methods=['POST'])
+def goon_effect(game_id):
+    """检查并应用莽夫效果"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    data = request.json
+    game = games[game_id]
+    selector_id = data.get('selector_id')  # 选择莽夫的玩家
+    goon_id = data.get('goon_id')  # 莽夫的ID
+    
+    # 找到莽夫
+    goon = next((p for p in game.players if p["id"] == goon_id), None)
+    if not goon or goon.get("role", {}).get("id") != "goon":
+        return jsonify({"error": "无效的莽夫玩家"}), 400
+    
+    # 找到选择者
+    selector = next((p for p in game.players if p["id"] == selector_id), None)
+    if not selector:
+        return jsonify({"error": "无效的选择者"}), 400
+    
+    # 检查莽夫今晚是否已被选择
+    if getattr(game, 'goon_chosen_tonight', False):
+        return jsonify({
+            "success": True,
+            "already_chosen": True,
+            "message": "莽夫今晚已被其他玩家选择"
+        })
+    
+    # 标记莽夫今晚已被选择
+    game.goon_chosen_tonight = True
+    
+    # 检查莽夫是否醉酒/中毒
+    goon_affected = goon.get("drunk") or goon.get("poisoned")
+    
+    result = {
+        "success": True,
+        "goon_name": goon["name"],
+        "selector_name": selector["name"],
+        "already_chosen": False
+    }
+    
+    if not goon_affected:
+        # 选择者醉酒到明天黄昏
+        selector["drunk"] = True
+        selector["drunk_until"] = {
+            "day": game.day_number + 1,
+            "night": game.night_number + 1
+        }
+        
+        # 莽夫改变阵营为选择者的阵营
+        selector_alignment = selector.get("role_type")
+        if selector_alignment in ["townsfolk", "outsider"]:
+            goon["goon_alignment"] = "good"
+            result["new_alignment"] = "善良"
+        else:
+            goon["goon_alignment"] = "evil"
+            result["new_alignment"] = "邪恶"
+        
+        game.add_log(f"💪 {selector['name']} 选择了莽夫 {goon['name']}，{selector['name']} 喝醉了，莽夫变为{result['new_alignment']}阵营", "night")
+        result["selector_drunk"] = True
+        result["alignment_changed"] = True
+    else:
+        game.add_log(f"💪 {selector['name']} 选择了莽夫 {goon['name']}（莽夫醉酒/中毒，能力无效）", "night")
+        result["selector_drunk"] = False
+        result["alignment_changed"] = False
+    
+    return jsonify(result)
+
+# 更新日期: 2026-01-08 - 麻脸巫婆获取可变更角色列表
+@app.route('/api/game/<game_id>/pit_hag_roles', methods=['GET'])
+def get_pit_hag_roles(game_id):
+    """获取麻脸巫婆可以选择的角色列表（不在场的角色）"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    game = games[game_id]
+    
+    # 获取当前场上所有角色
+    current_role_ids = set()
+    for p in game.players:
+        if p.get("role"):
+            current_role_ids.add(p["role"].get("id"))
+    
+    # 获取剧本中所有可用角色（不在场的）
+    available_roles = []
+    for role_type in ["townsfolk", "outsider", "minion", "demon"]:
+        for role in game.script["roles"].get(role_type, []):
+            if role["id"] not in current_role_ids:
+                available_roles.append({
+                    "id": role["id"],
+                    "name": role["name"],
+                    "type": role_type,
+                    "ability": role.get("ability", "")
+                })
+    
+    return jsonify({
+        "available_roles": available_roles,
+        "current_roles": list(current_role_ids)
+    })
 
 
 if __name__ == '__main__':
