@@ -7,7 +7,7 @@
 ![Version](https://img.shields.io/badge/Version-v1.0.2+-blue.svg)
 ![Status](https://img.shields.io/badge/Status-Beta-orange.svg)
 
-**当前版本**：v1.0.2-2-g9890b8e | **最后更新**：2026-01-05
+**当前版本**：v1.0.3-beta.1-878c987 | **最后更新**：2026-01-09
 
 ## ✨ 核心功能
 
