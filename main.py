@@ -3,12 +3,17 @@ import random
 import json
 from datetime import datetime
 from game_data import SCRIPTS, ROLE_TYPES, get_role_distribution, NIGHT_ORDER_PHASES, DAY_PHASES
+from player_api import player_bp, init_player_api
 
 app = Flask(__name__)
 app.secret_key = 'blood_on_the_clocktower_storyteller_secret_key_2024'
 
 # 全局游戏状态存储
 games = {}
+
+# 注册玩家端蓝图
+app.register_blueprint(player_bp)
+init_player_api(games)
 
 class Game:
     def __init__(self, game_id, script_id, player_count):
@@ -35,10 +40,10 @@ class Game:
         self.zombuul_first_death = False  # 僵怖是否已经"假死"过
         self.po_skipped_last_night = False  # 珀上一晚是否跳过了行动
         self.shabaloth_revive_available = False  # 沙巴洛斯是否可以复活
-        # 更新日期: 2026-01-05 - 恶魔代言人追踪
+        # 更新日期: 2026-01-09 - 恶魔代言人追踪
         self.devils_advocate_previous_targets = []  # 恶魔代言人之前选过的目标
         self.devils_advocate_protected = None  # 今天被恶魔代言人保护的玩家ID
-        # 更新日期: 2026-01-05 - 弄臣、月之子、莽夫追踪
+        # 更新日期: 2026-01-09 - 弄臣、月之子、莽夫追踪
         self.goon_chosen_tonight = False  # 莽夫今晚是否已被选择
         self.pending_moonchild = None  # 等待处理的月之子（死亡时触发）
         
@@ -735,6 +740,13 @@ class Game:
         # 处理跳过行动
         elif action_type == "skip":
             self.add_log(f"[夜间] {player['name']} 选择不行动", "night")
+        
+        # 更新日期: 2026-01-12 - 处理信息类行动
+        elif action_type == "info":
+            if target_player:
+                self.add_log(f"[夜间] {player['name']} 获取了关于 {target_player['name']} 的信息", "night")
+            else:
+                self.add_log(f"[夜间] {player['name']} 获取了信息", "night")
         
         # 其他行动
         elif player:
@@ -2704,6 +2716,27 @@ def get_pit_hag_roles(game_id):
     })
 
 
+# ==================== 游戏代码 API ====================
+
+@app.route('/api/game/<game_id>/code', methods=['GET'])
+def get_game_code(game_id):
+    """获取游戏代码（用于玩家加入）"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+    
+    # 返回游戏ID的简短版本作为代码
+    parts = game_id.split('_')
+    if len(parts) >= 3:
+        short_code = parts[-1][-6:]
+    else:
+        short_code = game_id[-8:]
+    
+    return jsonify({
+        "game_id": game_id,
+        "short_code": short_code,
+        "full_code": game_id
+    })
+
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-
