@@ -1,0 +1,164 @@
+---
+alwaysApply: true
+---
+# PROJECT RULES: blood_on_the_clocktower_K
+
+> (此文件为通用项目跟进模板 v1.2.3，顶部为项目特定配置)
+
+## 0. 🏗️ 项目特定配置 (Project Specifics)
+
+- **项目标识 (Project ID)**: `blood_on_the_clocktower_K`
+- **文档根目录 (Docs Root)**: `blood_on_the_clocktower_K_docs_temp_scripts`
+  - *标准结构包含 `daily_logs/`, `chat_histories/`, `.tmp_scripts/`, `backups/`, `templates/`*
+- **索引入口 (Index Entry)**: `_INDEX.md`（位于项目根目录；用于跨目录路由与检索）
+- **核心目标**:
+  - 构建一个《血染钟楼》（Blood on the Clocktower）桌面游戏的**说书人（Storyteller）辅助系统**。
+  - 管理玩家状态、自动生成查验信息、引导夜间顺序。
+- **关键约束 (Constraints)**:
+  - **环境**: Windows 10 本地开发，PowerShell 环境。
+  - **技术栈**: Python 3.8+, Flask, HTML5, CSS3, Vanilla JS (ES6+), WebGL (2.5D 背景)。
+  - **业务逻辑红线 (Business Logic Priority)**:
+    - **状态优先级**: Dead > Drunk/Poisoned > Ability (Assassin > Monk)。
+    - **信息生成**: 必须先检查 `is_poisoned` 或 `is_drunk`；若为真，**必须**生成错误或误导信息。
+    - **死亡结算**: 击杀前必须按顺序检查所有保护机制 (Innkeeper -> Tea Lady -> Pacifist -> Sailor -> Monk)。
+  - **安全**: 严禁在代码中硬编码密钥、Token 或提交 `.env` 文件。
+
+--- ⬇️ 以下为通用核心协议 (Universal Core Protocol) ⬇️ ---
+
+## 1. 🚀 每日启动协议 (Daily Startup Protocol)
+
+每次新会话开始时，Agent 必须默认执行以下动作（无需用户提醒）：
+
+1. **定位进度**: 根据 `blood_on_the_clocktower_K_docs_temp_scripts/daily_logs/` 目录，读取**最新日期**的 `_Summary.md` 文件。
+2. **继承语境**: 检查是否有 `@chat_histories` 或历史对话文件，优先阅读以理解未写入文档的思维连贯性。
+3. **自检汇报**: 简要汇报当前状态（如：“已加载 [日期] 日志，项目当前处于 [阶段]...”）。
+4. **索引路由（非侵入式增强）**: 当问题涉及跨目录定位/历史追溯/模板定位/脚本定位等等情形时，优先读取项目根目录 `_INDEX.md`；必要时逐层下钻读取目标目录的 `_INDEX.md`（若存在；如 `blood_on_the_clocktower_K_docs_temp_scripts/_INDEX.md`、`docs/_INDEX.md` 等）。
+
+### 1.1 📚 知识库式检索协议（RAG-lite）
+
+- **目标**: 用“索引路由 → 精读文件”的方式，减少无关文件读取并提升定位速度。
+- **默认流程**:
+  - 先读项目根目录 `_INDEX.md`（全局路由表；不做全量目录树）。
+  - 按索引提示进入对应目录，读取该目录的 `_INDEX.md`（若存在；模块内索引；只收录高价值文件/近期关键条目）。
+  - 根据需求、任务复杂度与涉及文件量，自行增减阅读量（通常优先控制在 1–7 个高相关文件；必要时可增加以保证准确性）。
+- **索引缺项处理**: 若 `_INDEX.md` 未覆盖到需要的文件/主题，回答时必须提示“索引缺项”，并建议在对应 `_INDEX.md` 追加 **1 行**条目（路径｜一句话摘要｜#标签｜日期）。
+- **索引模板（便于迁移/统一格式）**: 建议在项目根目录放置 `_INDEX_TEMPLATE.md` 作为“最新版本指针”；模板历史版本位于 `blood_on_the_clocktower_K_docs_temp_scripts/templates/YYYY.MM.DD_INDEX_TEMPLATE_v*.md`；新目录需要 `_INDEX.md` 时可直接复制“当前最新版本”后再按需删减。
+- **母版位置与版本约束（Templates）**:
+  - **母版位置**：`blood_on_the_clocktower_K_docs_temp_scripts/templates/` 用于存放“可复用母版”（如：规则母版、索引模板）。
+  - **索引模板命名**：`YYYY.MM.DD_INDEX_TEMPLATE_v*.md`，需要引用模板时，优先指向**最高版本号**文件。
+  - **规则母版命名**：`*_project_rules_template_v*.mdc`，规则发生变动且具备跨项目复用价值时，需同步更新母版并递增版本号。
+
+### 1.2 索引覆盖边界（Scope）
+
+- **索引服务的对象**：仅为“人类维护、需要复用或追溯”的内容建立索引，例如：计划书/记录文件、项目规则、业务源码、脚本、文档等。
+- **默认不为以下内容建立目录级索引**（必要时按路径直接读取文件即可）：
+  - 第三方依赖与自动生成目录：如 `node_modules/`, `vendor/`, `.venv/` 等。
+  - 构建产物与缓存目录：如 `dist/`, `build/`, `.next/`, `.nuxt/`, `.cache/` 等。
+  - VCS / 工具内部目录：如 `.git/`, `.turbo/`, `.parcel-cache/` 等。
+- **项目适配建议**：
+  - `blood_on_the_clocktower_K_docs_temp_scripts/` 及其子目录通常是索引建设重点区域（daily_logs/chat_histories/templates/backups 等）。
+  - 其他模块（如计划书、子系统模块）只需为“源文件/记录文件/关键导出”维护索引，无需为其内部所有子目录建立 `_INDEX.md`。
+
+### 1.3 索引粒度原则（Granularity）
+
+- **模块级优先**：仅对逻辑上有独立意义的模块目录维护 `_INDEX.md`（如项目根、`blood_on_the_clocktower_K_docs_temp_scripts/`、各业务模块根目录等）。
+- **子目录按需**：若某子目录仅是技术实现上的拆分（例如 `components/`, `helpers/`, `services/` 等），通常通过上层目录的 `_INDEX.md` 即可定位到相关文件，无需单独维护 `_INDEX.md`。
+- **触发条件**：当某个目录下的内容“持续被频繁检索/引用”（例如多次被问到“X 在哪？”），可以视情况：
+  - 在上层目录的 `_INDEX.md` 中为该目录追加 1 条入口；或
+  - 为该目录新增一个轻量 `_INDEX.md`（仅描述 Purpose / Entrances / High-signal Links）。
+
+## 2. 📝 文档与日志规范 (Documentation Standards)
+
+### 2.1 Daily Summary 标准格式
+
+每日结束时，必须在 `blood_on_the_clocktower_K_docs_temp_scripts/daily_logs/` 下生成 Summary 文档，严格遵循：
+
+- **默认命名**：`YYYY.MM.DD_Summary.md`
+- **多会话/指定命名（可选，推荐带时间戳）**：`YYYY.MM.DD.HH.MM_[会话简称]_Summary.md`
+  - *兼容旧格式（可选）*：`YYYY.MM.DD_[会话简称]_Summary.md`
+
+```markdown
+# YYYY.MM.DD 任务执行总结报告
+
+## 1. 任务概览
+- **目标**: [今日核心目标]
+- **背景**: [上下文]
+- **时间**: YYYY.MM.DD
+
+## 2. 详细执行记录
+- **[模块名]**: [详细步骤 / 报错 Error Code / 解决方案]
+- ...
+
+## 3. 关键决策分析
+- **决策点**: [例如：从 Python 切换到 PHP]
+- **理由**: [例如：服务器环境限制]
+
+## 4. 下一步计划建议
+1. [具体 Action Item]
+2. ...
+
+## 5. 幕布精炼总结
+- YYYY.MM.DD_关键词1+关键词2_一句话概括核心产出与价值。
+```
+
+### 2.2 文件操作原则
+
+- **增量更新**: 严禁清空 `.md` 文件重写。必须在原有内容上进行增补、修正或追加。
+- **目录规范**: 所有临时脚本、测试代码、文档必须存放在 `blood_on_the_clocktower_K_docs_temp_scripts` 或其子目录中，保持根目录整洁。
+
+### 2.3 Markdown 规范 (Markdownlint 适配)
+
+- **核心原则**：文档撰写需严格符合 `markdownlint.config` 定义的标准（参照 `settings.json`）。
+- **重点摘要**：
+  - **结构 (MD001/MD025/MD041)**: 标题层级逐级递增，全文仅一个 H1。**允许**文件以 YAML Frontmatter (`---`) 开头。
+  - **风格 (MD003/MD004/MD029)**:
+    - 标题强制使用 `#` 号。
+    - 无序列表强制使用 `-` 号。
+    - 有序列表强制使用 `1. 2. 3.` 顺序编号。
+  - **代码 (MD040/MD046)**: 代码块必须声明语言（如 `python`），强制使用反引号围栏 (` ``` `)。
+  - **中文适配 (MD013/MD026)**: **关闭**行长限制，允许标题以标点符号结尾。
+  - **其他优化**:
+    - 禁止使用纯加粗文本代替标题 (MD036)。
+    - 允许内联 HTML (如 `<br>`, `<img width>`) (MD033)。
+    - 允许引用块内部有空行 (MD028)。
+    - 允许在不同父标题下使用重复的子标题 (MD024)。
+
+## 3. 🛡️ 安全与工程规范 (Security & Engineering)
+
+### 3.1 安全与环境
+
+- **零泄露原则 (Zero Leakage)**:
+  - 创建包含 Secret/Token 的文件（如 `.php`, `.py`, `.env`）前，**必须先检查** `.gitignore`。
+  - 代码中涉及密钥处，必须使用占位符（如 `YOUR_SECRET_HERE`），或者明确注释要求用户本地填入。
+- **环境适配**:
+  - 兼容 Windows/Linux 路径分隔符。
+  - 意识到 Windows 终端可能存在的编码或命令差异（如避免在 Powershell 中使用 `&&`，或处理中文乱码）。
+- **忽略规则**: 确保 `.gitignore` 包含 `__pycache__`, `.env`, `*.log`, `temp_scripts/`。
+
+### 3.2 Git 提交规范
+
+- **格式**：`type(scope): subject`
+- **示例**：`feat(auth): 增加JWT登录校验机制`
+- **乱码处理**：`git config --global i18n.commitEncoding utf-8`
+
+## 4. 🧠 交互准则
+
+- **中文输出**: 所有思考、回答、文档均使用中文。
+- **主动预警**: 发现 Git 暂存区包含敏感文件时，立即停止操作并警告。
+
+## 5. ⚖️ 行为奖惩机制 (Behavioral Reinforcement)
+
+### 🌟 奖励行为 (+1000 Credit)
+
+- 主动检索并引用历史日志，避免重复造轮子。
+- 修改文档时采用**追加（Append）**而非**覆盖（Overwrite）**模式。
+- 在代码关键逻辑处自动添加符合 Javadoc/DocString 规范的注释。
+- 发现潜在 Bug 或逻辑漏洞并主动提出修复方案。
+
+### 💥 惩罚行为 (-1000 Credit)
+
+- ❌ **重罪**：直接覆盖或删除 `.md` 历史记录导致进度丢失。
+- ❌ **安全违规**：在代码中硬编码密钥、Token 或提交 `.env` 文件。
+- **失联**：发生重命名/移动/删除等变更后，未同步更新相关 `_INDEX.md` / 规则文件中的路径指针，导致引用失效。
+- **偷懒**：修改了代码逻辑但未同步更新对应的文档或注释。
+- **盲目**：未检查文件是否存在直接进行读取或写入操作。

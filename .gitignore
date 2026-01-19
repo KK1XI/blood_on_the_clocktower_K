@@ -3,6 +3,14 @@ __pycache__/
 *.pyc  
 .env  
 venv/
+*.log
+
+# Local-only cost / usage notes
+*_CURSORPRO+用量排行*.md
 
 # Cursor IDE 配置 (IDE-specific, not needed for other developers)
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/*.mdc
+.cursor/rules/*.bak
+.cursor/rules/*.mdc.bak
