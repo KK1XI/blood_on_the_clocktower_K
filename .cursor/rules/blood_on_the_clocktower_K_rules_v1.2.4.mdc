@@ -1,27 +1,31 @@
 ---
 alwaysApply: true
 ---
-# PROJECT RULES: blood_on_the_clocktower_K
+# PROJECT RULES: blood_on_the_clocktower_K_v1.2.4
 
-> (此文件为通用项目跟进模板 v1.2.3，顶部为项目特定配置)
+> (此文件为通用项目跟进模板 v1.2.4，顶部为项目特定配置)
 
 ## 0. 🏗️ 项目特定配置 (Project Specifics)
+>
+> **🆕 初始化说明**：在新项目开启时，请 AI 首先阅读项目 README，然后**修改并填充**本区块内容，以适配项目特色。
 
 - **项目标识 (Project ID)**: `blood_on_the_clocktower_K`
 - **文档根目录 (Docs Root)**: `blood_on_the_clocktower_K_docs_temp_scripts`
-  - *标准结构包含 `daily_logs/`, `chat_histories/`, `.tmp_scripts/`, `backups/`, `templates/`*
-- **索引入口 (Index Entry)**: `_INDEX.md`（位于项目根目录；用于跨目录路由与检索）
+  - *注：命名规范通常为 `blood_on_the_clocktower_K_docs_temp_scripts`*
+  - *注：标准结构应包含 `daily_logs/`, `chat_histories/`, `.tmp_scripts/`, `backups/`, `templates/`*
+- **索引入口 (Index Entry)**: `_INDEX.md`（位于项目根目录；用于跨目录路由与检索；不做全量目录树）
 - **核心目标**:
   - 构建一个《血染钟楼》（Blood on the Clocktower）桌面游戏的**说书人（Storyteller）辅助系统**。
   - 管理玩家状态、自动生成查验信息、引导夜间顺序。
 - **关键约束 (Constraints)**:
   - **环境**: Windows 10 本地开发，PowerShell 环境。
+  - **依赖**: Python 3.8+；Flask；原生前端（HTML/CSS/Vanilla JS）；WebGL 渲染。
   - **技术栈**: Python 3.8+, Flask, HTML5, CSS3, Vanilla JS (ES6+), WebGL (2.5D 背景)。
+  - **安全**: 严禁提交任何 AppSecret、Token 或数据库密码；严禁提交 `.env` 文件或在代码中硬编码密钥/Token。
   - **业务逻辑红线 (Business Logic Priority)**:
     - **状态优先级**: Dead > Drunk/Poisoned > Ability (Assassin > Monk)。
     - **信息生成**: 必须先检查 `is_poisoned` 或 `is_drunk`；若为真，**必须**生成错误或误导信息。
-    - **死亡结算**: 击杀前必须按顺序检查所有保护机制 (Innkeeper -> Tea Lady -> Pacifist -> Sailor -> Monk)。
-  - **安全**: 严禁在代码中硬编码密钥、Token 或提交 `.env` 文件。
+    - **死亡结算**: 击杀前按优先级检查所有“可能存在的”保护机制（按剧本/在场角色：存在则检查，不存在跳过；示例：Innkeeper -> Tea Lady -> Pacifist -> Sailor -> Monk；若为 Assassin 等无视保护的攻击则跳过保护链）。
 
 --- ⬇️ 以下为通用核心协议 (Universal Core Protocol) ⬇️ ---
 
@@ -31,7 +35,7 @@ alwaysApply: true
 
 1. **定位进度**: 根据 `blood_on_the_clocktower_K_docs_temp_scripts/daily_logs/` 目录，读取**最新日期**的 `_Summary.md` 文件。
 2. **继承语境**: 检查是否有 `@chat_histories` 或历史对话文件，优先阅读以理解未写入文档的思维连贯性。
-3. **自检汇报**: 简要汇报当前状态（如：“已加载 [日期] 日志，项目当前处于 [阶段]...”）。
+3. **自检汇报**: 简要汇报当前状态（如：“已加载 `<日期>` 日志，项目当前处于 `<阶段>`...”）。
 4. **索引路由（非侵入式增强）**: 当问题涉及跨目录定位/历史追溯/模板定位/脚本定位等等情形时，优先读取项目根目录 `_INDEX.md`；必要时逐层下钻读取目标目录的 `_INDEX.md`（若存在；如 `blood_on_the_clocktower_K_docs_temp_scripts/_INDEX.md`、`docs/_INDEX.md` 等）。
 
 ### 1.1 📚 知识库式检索协议（RAG-lite）

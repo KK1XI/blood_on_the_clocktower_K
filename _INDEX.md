@@ -15,7 +15,7 @@
 
 ## 3) 高价值直达 (High-signal Links)
 
-- `.cursor/rules/blood_on_the_clocktower_K_rules.mdc` | 项目核心规则（最新版） | #rules #core | 2026-01-19
+- `.cursor/rules/blood_on_the_clocktower_K_rules_v1.2.4.mdc` | 项目核心规则（v1.2.4） | #rules #core | 2026-01-20
 - `_INDEX_TEMPLATE.md` | 索引模板指针 | #template #index | 2026-01-19
 - `blood_on_the_clocktower_K_docs_temp_scripts/daily_logs/2026.01.07_summary_1.md` | 最近进度总结（当前目录内最新） | #summary #latest | 2026-01-19
 - `docs/Project_Overview.md` | 项目整体架构与功能概览 | #overview #arch | 2025-12-23
