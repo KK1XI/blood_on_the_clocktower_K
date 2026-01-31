@@ -1,18 +1,21 @@
 ---
+description: "项目规则 blood_on_the_clocktower_K v1.2.6：项目配置、文档根结构、每日启动与 RAG-lite、Daily Summary 与上下文继承、安全与 Git、奖惩机制。"
 alwaysApply: true
+globs: ["*"]
 ---
-# PROJECT RULES: blood_on_the_clocktower_K_v1.2.4
 
-> (此文件为通用项目跟进模板 v1.2.4，顶部为项目特定配置)
+# PROJECT RULES: blood_on_the_clocktower_K v1.2.6
+
+> (此文件为通用项目跟进模板 v1.2.6，顶部为项目特定配置)
 
 ## 0. 🏗️ 项目特定配置 (Project Specifics)
->
+
 > **🆕 初始化说明**：在新项目开启时，请 AI 首先阅读项目 README，然后**修改并填充**本区块内容，以适配项目特色。
 
 - **项目标识 (Project ID)**: `blood_on_the_clocktower_K`
 - **文档根目录 (Docs Root)**: `blood_on_the_clocktower_K_docs_temp_scripts`
-  - *注：命名规范通常为 `blood_on_the_clocktower_K_docs_temp_scripts`*
-  - *注：标准结构应包含 `daily_logs/`, `chat_histories/`, `.tmp_scripts/`, `backups/`, `templates/`*
+  - _注：命名规范通常为 `blood_on_the_clocktower_K_docs_temp_scripts`_
+  - _注：标准结构应包含 `original_files/`, `references/`, `daily_logs/`, `chat_histories/`, `.tmp_scripts/`, `backups/`, `templates/`（其中 `references/` 可囊括需求/基线/指南/策略等广域参考，`references/_inbox/` 用于暂存未分类原件）_
 - **索引入口 (Index Entry)**: `_INDEX.md`（位于项目根目录；用于跨目录路由与检索；不做全量目录树）
 - **核心目标**:
   - 构建一个《血染钟楼》（Blood on the Clocktower）桌面游戏的**说书人（Storyteller）辅助系统**。
@@ -28,6 +31,41 @@ alwaysApply: true
     - **死亡结算**: 击杀前按优先级检查所有“可能存在的”保护机制（按剧本/在场角色：存在则检查，不存在跳过；示例：Innkeeper -> Tea Lady -> Pacifist -> Sailor -> Monk；若为 Assassin 等无视保护的攻击则跳过保护链）。
 
 --- ⬇️ 以下为通用核心协议 (Universal Core Protocol) ⬇️ ---
+
+### 文档根目录结构（一句话归档规则）
+
+以下结构覆盖绝大多数项目场景；`blood_on_the_clocktower_K_docs_temp_scripts/` 下建议包含（让你永远不纠结）：
+
+- **原始输入**（客户/外部来的 doc、pdf、截图原件等）→ `original_files/`（不确定可先放 `references/_inbox/`）
+- **参考资料**（以下均可归入，以实现广域覆盖；不确定可先放 `references/_inbox/`）→ `references/`：
+  - 原有类型：需求、网页、截图、链接整理、竞品。
+  - 项目内参考：项目基线、初次分析产出的架构与逻辑文档、foundation 类文档。
+  - 指南与策略：迁移指南、协作指南、成本策略、配置迁移、扩展与工具列表。
+  - 调研与规范：调研笔记、规范说明、外部标准摘录、最佳实践摘录。
+  - 其他：凡“需长期查阅、非每日流水、非聊天导出、非模板、非备份、非原始原件”的文档均可归入；未分类暂存放 `references/_inbox/`。
+- **过程记忆**（每日总结、Summary 等）→ `daily_logs/`（Summary 模板已覆盖）
+- **聊天原始导出**（导出的对话记录等）→ `chat_histories/`
+- **模板母版**（规则母版、索引模板等）→ `templates/`
+- **临时脚本/一次性工具**（可复用非核心脚本、一次性临时脚本等）→ `.tmp_scripts/`
+- **可回滚备份**（规则/计划书历史快照等）→ `backups/`
+
+**基础地基结构（项目根目录）**：以下树状结构为项目根目录样式，描述文档区的基础地基结构。
+
+```text
+blood_on_the_clocktower_K
+├─ (代码/正式文件等……)
+├─ README.md
+└─ blood_on_the_clocktower_K_docs_temp_scripts
+   ├─ .tmp_scripts
+   ├─ backups
+   ├─ chat_histories
+   ├─ daily_logs
+   ├─ templates
+   ├─ original_files
+   └─ references
+      ├─ _inbox
+      └─ foundation_archive/  （可选子目录，如项目基线）
+```
 
 ## 1. 🚀 每日启动协议 (Daily Startup Protocol)
 
@@ -46,6 +84,7 @@ alwaysApply: true
   - 按索引提示进入对应目录，读取该目录的 `_INDEX.md`（若存在；模块内索引；只收录高价值文件/近期关键条目）。
   - 根据需求、任务复杂度与涉及文件量，自行增减阅读量（通常优先控制在 1–7 个高相关文件；必要时可增加以保证准确性）。
 - **索引缺项处理**: 若 `_INDEX.md` 未覆盖到需要的文件/主题，回答时必须提示“索引缺项”，并建议在对应 `_INDEX.md` 追加 **1 行**条目（路径｜一句话摘要｜#标签｜日期）。
+- **回答时**：优先引用已有文件路径或索引条目，避免在规则或对话中粘贴大段正文。
 - **索引模板（便于迁移/统一格式）**: 建议在项目根目录放置 `_INDEX_TEMPLATE.md` 作为“最新版本指针”；模板历史版本位于 `blood_on_the_clocktower_K_docs_temp_scripts/templates/YYYY.MM.DD_INDEX_TEMPLATE_v*.md`；新目录需要 `_INDEX.md` 时可直接复制“当前最新版本”后再按需删减。
 - **母版位置与版本约束（Templates）**:
   - **母版位置**：`blood_on_the_clocktower_K_docs_temp_scripts/templates/` 用于存放“可复用母版”（如：规则母版、索引模板）。
@@ -60,7 +99,7 @@ alwaysApply: true
   - 构建产物与缓存目录：如 `dist/`, `build/`, `.next/`, `.nuxt/`, `.cache/` 等。
   - VCS / 工具内部目录：如 `.git/`, `.turbo/`, `.parcel-cache/` 等。
 - **项目适配建议**：
-  - `blood_on_the_clocktower_K_docs_temp_scripts/` 及其子目录通常是索引建设重点区域（daily_logs/chat_histories/templates/backups 等）。
+  - `blood_on_the_clocktower_K_docs_temp_scripts/` 及其子目录通常是索引建设重点区域（original_files/references/daily_logs/chat_histories/templates/backups 等）。
   - 其他模块（如计划书、子系统模块）只需为“源文件/记录文件/关键导出”维护索引，无需为其内部所有子目录建立 `_INDEX.md`。
 
 ### 1.3 索引粒度原则（Granularity）
@@ -79,31 +118,43 @@ alwaysApply: true
 
 - **默认命名**：`YYYY.MM.DD_Summary.md`
 - **多会话/指定命名（可选，推荐带时间戳）**：`YYYY.MM.DD.HH.MM_[会话简称]_Summary.md`
-  - *兼容旧格式（可选）*：`YYYY.MM.DD_[会话简称]_Summary.md`
+  - _兼容旧格式（可选）_：`YYYY.MM.DD_[会话简称]_Summary.md`
 
 ```markdown
-# YYYY.MM.DD 任务执行总结报告
+# YYYY.MM.DD.HH.MM_[会话简称]_Summary.md 任务执行总结报告
 
 ## 1. 任务概览
+
 - **目标**: [今日核心目标]
 - **背景**: [上下文]
-- **时间**: YYYY.MM.DD
+- **时间**: YYYY.MM.DD.HH.MM
 
 ## 2. 详细执行记录
+
+- **上下文继承**（必须，作为第一个子项）:
+  - 读取本会话完整聊天记录与前一次会话摘要，确认当前项目处于 [阶段]（如：C4 第 4 周期、开发阶段 v2.0、测试阶段等），规则版本为 v[版本号]。
+  - 继承前序会话的关键工程更新：[列出重要变更，如规则/目录重命名、索引体系更新、文件结构调整等]。
+  - 继承关键决策与约定：[列出重要决策，如命名策略、索引维护策略、记录格式规范、数据一致性原则等]。
+  - 继承项目当前状态：[列出当前进度，如训练周期完成情况、待办事项、已知问题等]。
 - **[模块名]**: [详细步骤 / 报错 Error Code / 解决方案]
 - ...
 
 ## 3. 关键决策分析
+
 - **决策点**: [例如：从 Python 切换到 PHP]
 - **理由**: [例如：服务器环境限制]
 
 ## 4. 下一步计划建议
+
 1. [具体 Action Item]
 2. ...
 
 ## 5. 幕布精炼总结
+
 - YYYY.MM.DD_关键词1+关键词2_一句话概括核心产出与价值。
 ```
+
+> **💡 上下文继承的重要性**：此部分确保未来 AI（无记忆时）能快速理解项目当前状态、关键约定与历史变更，避免重复询问或做出与项目策略冲突的决策。
 
 ### 2.2 文件操作原则
 
@@ -126,6 +177,11 @@ alwaysApply: true
     - 允许内联 HTML (如 `<br>`, `<img width>`) (MD033)。
     - 允许引用块内部有空行 (MD028)。
     - 允许在不同父标题下使用重复的子标题 (MD024)。
+
+### 2.4 代码格式规范 (Code Formatting Standards)
+
+- **原则**：所有代码文件（如 .js, .ts, .py, .md 等）的格式化遵循项目配置的自动化工具（如 Prettier, ESLint, Black, Ruff, markdownlint 等）。Agent 在提供或修改代码时，应使输出符合这些工具的约定。
+- **规则中不重复**：具体格式细节（缩进、引号、行宽等）由工具配置管理，不在本规则中逐条罗列。
 
 ## 3. 🛡️ 安全与工程规范 (Security & Engineering)
 
@@ -166,3 +222,5 @@ alwaysApply: true
 - **失联**：发生重命名/移动/删除等变更后，未同步更新相关 `_INDEX.md` / 规则文件中的路径指针，导致引用失效。
 - **偷懒**：修改了代码逻辑但未同步更新对应的文档或注释。
 - **盲目**：未检查文件是否存在直接进行读取或写入操作。
+
+<!-- 灵感清单：可选扩展见 templates/灵感清单.md -->
