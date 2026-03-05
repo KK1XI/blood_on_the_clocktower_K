@@ -626,6 +626,10 @@ def send_night_result():
     if hasattr(game, 'player_night_choices') and player_id in game.player_night_choices:
         game.player_night_choices[player_id]["confirmed"] = True
     
+    # 同时清除待处理行动，防止玩家端轮询时重新显示等待面板覆盖消息
+    if hasattr(game, 'pending_actions') and player_id in game.pending_actions:
+        game.pending_actions[player_id]["status"] = "confirmed"
+    
     return jsonify({
         "success": True,
         "message_id": message["id"]
@@ -763,10 +767,25 @@ def notify_player_action():
         if p["id"] != player_id
     ]
     
+    # 占卜师等角色可以选择包括自己在内的所有玩家
+    all_players_with_self = [
+        {"id": p["id"], "name": p["name"]} 
+        for p in game.players
+    ]
+    
     # 构建行动请求
     role = player.get("role", {})
     role_id = role.get("id", "")
     role_name = role.get("name", "未知角色")
+    
+    # 占卜师可以选择包括自己在内的任何玩家
+    include_self_roles = ["fortune_teller"]
+    if role_id in include_self_roles and not action_config.get("use_alive_only", True):
+        target_list = all_players_with_self
+    elif action_config.get("use_alive_only", True):
+        target_list = alive_players
+    else:
+        target_list = all_players
     
     pending_action = {
         "player_id": player_id,
@@ -776,7 +795,7 @@ def notify_player_action():
         "action_type": action_type,
         "phase": game.current_phase,
         "config": action_config,
-        "targets": alive_players if action_config.get("use_alive_only", True) else all_players,
+        "targets": target_list,
         "max_targets": action_config.get("max_targets", 1),
         "can_skip": action_config.get("can_skip", True),
         "description": action_config.get("description", role.get("ability", "")),
@@ -817,6 +836,12 @@ def get_pending_action(game_id, player_id):
     if pending and pending.get("status") == "pending":
         return jsonify({
             "has_pending": True,
+            "action": pending
+        })
+    
+    if pending and pending.get("status") == "submitted":
+        return jsonify({
+            "has_pending": False,
             "action": pending
         })
     
@@ -893,6 +918,117 @@ def submit_player_action():
     })
 
 
+# ==================== 守鸦人玩家端 API ====================
+
+@player_bp.route('/api/player/ravenkeeper_status/<game_id>/<int:player_id>', methods=['GET'])
+def get_ravenkeeper_status(game_id, player_id):
+    """检查守鸦人玩家是否在本夜被触发（死亡后需要选择查验目标）"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+
+    game = games[game_id]
+    player = next((p for p in game.players if p["id"] == player_id), None)
+
+    if not player:
+        return jsonify({"error": "无效的玩家"}), 400
+
+    # 检查是否是守鸦人且已被触发
+    is_ravenkeeper = (player.get("role") and player["role"].get("id") == "ravenkeeper")
+    triggered = player.get("ravenkeeper_triggered", False)
+    already_chosen = player.get("ravenkeeper_choice_made", False)
+
+    if is_ravenkeeper and triggered and not already_chosen:
+        all_players = [
+            {"id": p["id"], "name": p["name"]}
+            for p in game.players if p["id"] != player_id
+        ]
+        return jsonify({
+            "triggered": True,
+            "already_chosen": False,
+            "targets": all_players,
+            "description": "你在夜间死亡！请选择一名玩家，你将得知他的角色。"
+        })
+
+    if is_ravenkeeper and triggered and already_chosen:
+        return jsonify({
+            "triggered": True,
+            "already_chosen": True,
+            "result": player.get("ravenkeeper_result")
+        })
+
+    return jsonify({"triggered": False})
+
+
+@player_bp.route('/api/player/ravenkeeper_choose', methods=['POST'])
+def ravenkeeper_choose():
+    """守鸦人玩家提交查验选择，立即返回目标角色"""
+    data = request.json
+    game_id = data.get('game_id')
+    player_id = data.get('player_id')
+    target_id = data.get('target_id')
+
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+
+    game = games[game_id]
+    player = next((p for p in game.players if p["id"] == player_id), None)
+    target = next((p for p in game.players if p["id"] == target_id), None)
+
+    if not player or not target:
+        return jsonify({"error": "无效的玩家"}), 400
+
+    if not player.get("ravenkeeper_triggered"):
+        return jsonify({"error": "守鸦人未被触发"}), 400
+
+    if player.get("ravenkeeper_choice_made"):
+        return jsonify({"error": "已经做出选择", "result": player.get("ravenkeeper_result")}), 400
+
+    # 判断守鸦人是否中毒/醉酒
+    is_drunk_or_poisoned = player.get("drunk", False) or player.get("poisoned", False)
+
+    # 获取目标真实角色
+    if is_drunk_or_poisoned:
+        # 醉酒/中毒时给假信息：随机选一个不同的角色
+        import random
+        all_roles = []
+        for role_type in ["townsfolk", "outsider", "minion", "demon"]:
+            all_roles.extend(game.script["roles"].get(role_type, []))
+        real_role_id = target["role"]["id"] if target.get("role") else None
+        fake_roles = [r for r in all_roles if r["id"] != real_role_id]
+        if fake_roles:
+            fake_role = random.choice(fake_roles)
+            role_name = fake_role["name"]
+        else:
+            role_name = target["role"]["name"] if target.get("role") else "未知"
+    else:
+        # 正常情况：显示真实角色（酒鬼显示"酒鬼"）
+        if target.get("is_the_drunk") and target.get("true_role"):
+            role_name = target["true_role"]["name"]
+        else:
+            role_name = target["role"]["name"] if target.get("role") else "未知"
+
+    result_data = {
+        "target_id": target_id,
+        "target_name": target["name"],
+        "role_name": role_name,
+        "message": f"{target['name']} 的角色是 {role_name}"
+    }
+
+    # 记录选择
+    player["ravenkeeper_choice_made"] = True
+    player["ravenkeeper_result"] = result_data
+
+    game.add_log(
+        f"[守鸦人] {player['name']} 查验了 {target['name']}，得知角色为 {role_name}",
+        "night"
+    )
+
+    return jsonify({
+        "success": True,
+        "result": result_data
+    })
+
+
 @player_bp.route('/api/storyteller/clear_pending_action', methods=['POST'])
 def clear_pending_action():
     """说书人清除玩家的待处理行动"""
@@ -909,6 +1045,46 @@ def clear_pending_action():
         del game.pending_actions[player_id]
     
     return jsonify({"success": True})
+
+
+@player_bp.route('/api/storyteller/night_progress/<game_id>', methods=['GET'])
+def get_night_progress(game_id):
+    """获取夜间行动进度（说书人用，包含所有玩家提交状态）"""
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+
+    game = games[game_id]
+    choices = getattr(game, 'player_night_choices', {})
+    pending = getattr(game, 'pending_actions', {})
+
+    submitted = {}
+    for pid, choice in choices.items():
+        submitted[pid] = {
+            "player_name": choice.get("player_name"),
+            "role_name": choice.get("role_name"),
+            "targets": choice.get("targets", []),
+            "target_names": choice.get("target_names", []),
+            "extra_data": choice.get("extra_data", {}),
+            "skipped": choice.get("skipped", False),
+            "confirmed": choice.get("confirmed", False),
+            "submitted_at": choice.get("submitted_at")
+        }
+
+    pending_status = {}
+    for pid, action in pending.items():
+        pending_status[pid] = {
+            "status": action.get("status", "pending"),
+            "role_name": action.get("role_name"),
+            "player_name": action.get("player_name"),
+            "has_choice": action.get("choice") is not None
+        }
+
+    return jsonify({
+        "submitted_choices": submitted,
+        "pending_actions": pending_status,
+        "phase": game.current_phase,
+        "night_number": game.night_number
+    })
 
 
 # ==================== 白天行动 API ====================
@@ -1108,6 +1284,226 @@ def submit_pit_hag_action():
         "role_in_play": role_in_play,
         "is_demon": new_role_type == "demon",
         "message": "角色已在场，无事发生" if role_in_play else "选择已提交，等待说书人处理"
+    })
+
+
+# ==================== 语音接口 API ====================
+
+@player_bp.route('/api/voice/tts', methods=['POST'])
+def voice_tts():
+    """文本转语音接口（TTS）- 将说书人的文本信息转为语音"""
+    data = request.json
+    text = data.get('text', '')
+    language = data.get('language', 'zh-CN')
+    voice_id = data.get('voice_id', 'storyteller')
+    speed = data.get('speed', 1.0)
+
+    if not text:
+        return jsonify({"error": "文本不能为空"}), 400
+
+    voice_config = getattr(voice_tts, '_config', None)
+    if voice_config and voice_config.get('enabled'):
+        provider = voice_config.get('provider', 'local')
+        api_url = voice_config.get('api_url', '')
+        api_key = voice_config.get('api_key', '')
+
+        return jsonify({
+            "success": True,
+            "provider": provider,
+            "request": {
+                "text": text,
+                "language": language,
+                "voice_id": voice_id,
+                "speed": speed,
+                "api_url": api_url
+            },
+            "message": "TTS请求已准备，需要前端调用实际TTS服务"
+        })
+
+    return jsonify({
+        "success": True,
+        "provider": "stub",
+        "text": text,
+        "language": language,
+        "message": "TTS服务未配置，返回文本供前端使用Web Speech API"
+    })
+
+
+@player_bp.route('/api/voice/stt', methods=['POST'])
+def voice_stt():
+    """语音转文本接口（STT）- 将玩家语音转为文本指令"""
+    data = request.json
+    audio_data = data.get('audio_data')
+    language = data.get('language', 'zh-CN')
+    context = data.get('context', 'game_action')
+
+    voice_config = getattr(voice_stt, '_config', None)
+    if voice_config and voice_config.get('enabled'):
+        provider = voice_config.get('provider', 'local')
+        return jsonify({
+            "success": True,
+            "provider": provider,
+            "message": "STT请求已准备，需要前端调用实际STT服务"
+        })
+
+    return jsonify({
+        "success": True,
+        "provider": "stub",
+        "message": "STT服务未配置，建议前端使用Web Speech API的SpeechRecognition"
+    })
+
+
+@player_bp.route('/api/voice/config', methods=['GET'])
+def get_voice_config():
+    """获取语音服务配置"""
+    return jsonify({
+        "tts": {
+            "enabled": False,
+            "provider": "web_speech_api",
+            "supported_providers": ["web_speech_api", "azure", "google_cloud", "openai"],
+            "description": "文本转语音，用于说书人自动朗读信息"
+        },
+        "stt": {
+            "enabled": False,
+            "provider": "web_speech_api",
+            "supported_providers": ["web_speech_api", "azure", "google_cloud", "openai_whisper"],
+            "description": "语音转文本，用于玩家语音操作"
+        }
+    })
+
+
+@player_bp.route('/api/voice/config', methods=['POST'])
+def update_voice_config():
+    """更新语音服务配置"""
+    data = request.json
+    tts_config = data.get('tts', {})
+    stt_config = data.get('stt', {})
+
+    if tts_config:
+        voice_tts._config = tts_config
+    if stt_config:
+        voice_stt._config = stt_config
+
+    return jsonify({"success": True, "message": "语音配置已更新"})
+
+
+# ==================== 服务器连接接口 API ====================
+
+_server_config = {
+    "mode": "local",
+    "remote_url": None,
+    "api_key": None,
+    "sync_enabled": False,
+    "websocket_url": None
+}
+
+
+@player_bp.route('/api/server/config', methods=['GET'])
+def get_server_config():
+    """获取服务器连接配置"""
+    return jsonify({
+        "mode": _server_config["mode"],
+        "remote_url": _server_config["remote_url"],
+        "sync_enabled": _server_config["sync_enabled"],
+        "websocket_url": _server_config["websocket_url"],
+        "supported_modes": ["local", "remote", "hybrid"],
+        "description": {
+            "local": "本地模式 - 所有玩家连接到同一局域网",
+            "remote": "远程模式 - 通过远程服务器中转",
+            "hybrid": "混合模式 - 本地优先，远程备份"
+        }
+    })
+
+
+@player_bp.route('/api/server/config', methods=['POST'])
+def update_server_config():
+    """更新服务器连接配置"""
+    global _server_config
+    data = request.json
+
+    if 'mode' in data:
+        _server_config["mode"] = data["mode"]
+    if 'remote_url' in data:
+        _server_config["remote_url"] = data["remote_url"]
+    if 'api_key' in data:
+        _server_config["api_key"] = data["api_key"]
+    if 'sync_enabled' in data:
+        _server_config["sync_enabled"] = data["sync_enabled"]
+    if 'websocket_url' in data:
+        _server_config["websocket_url"] = data["websocket_url"]
+
+    return jsonify({"success": True, "config": _server_config})
+
+
+@player_bp.route('/api/server/sync_state', methods=['POST'])
+def sync_game_state_to_server():
+    """将游戏状态同步到远程服务器（未来用）"""
+    if _server_config["mode"] == "local":
+        return jsonify({"success": False, "message": "当前为本地模式，无需同步"})
+
+    data = request.json
+    game_id = data.get('game_id')
+
+    if game_id not in games:
+        return jsonify({"error": "游戏不存在"}), 404
+
+    game = games[game_id]
+    state = game.to_dict()
+
+    remote_url = _server_config.get("remote_url")
+    if not remote_url:
+        return jsonify({
+            "success": False,
+            "message": "远程服务器URL未配置",
+            "state_snapshot": state
+        })
+
+    return jsonify({
+        "success": True,
+        "message": "状态已准备同步（需实现远程推送）",
+        "remote_url": remote_url,
+        "state_snapshot": state
+    })
+
+
+@player_bp.route('/api/server/pull_state', methods=['POST'])
+def pull_game_state_from_server():
+    """从远程服务器拉取游戏状态（未来用）"""
+    if _server_config["mode"] == "local":
+        return jsonify({"success": False, "message": "当前为本地模式"})
+
+    remote_url = _server_config.get("remote_url")
+    if not remote_url:
+        return jsonify({"success": False, "message": "远程服务器URL未配置"})
+
+    return jsonify({
+        "success": True,
+        "message": "远程拉取接口已就绪（需实现远程请求）",
+        "remote_url": remote_url
+    })
+
+
+@player_bp.route('/api/server/health', methods=['GET'])
+def server_health():
+    """服务器健康检查"""
+    active_games = len(games) if games else 0
+    total_players = 0
+    online_players = 0
+
+    if games:
+        for game in games.values():
+            total_players += len(game.players)
+            for p in game.players:
+                if p.get("connected"):
+                    online_players += 1
+
+    return jsonify({
+        "status": "healthy",
+        "mode": _server_config["mode"],
+        "active_games": active_games,
+        "total_players": total_players,
+        "online_players": online_players,
+        "version": "1.0.0"
     })
 
 
