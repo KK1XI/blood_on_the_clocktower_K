@@ -292,16 +292,21 @@ class Game:
         self.current_phase = "night"
         self.night_deaths = []
         self.night_actions = []
-        self.protected_players = []  # 今晚被保护的玩家ID列表
-        self.demon_kills = []  # 恶魔选择的击杀目标
+        self.protected_players = []
+        self.demon_kills = []
+        self._night_kills_processed = False
+        self._pre_process_results = None
         # 更新日期: 2026-01-05 - 重置驱魔人状态
         self.demon_exorcised_tonight = False  # 重置恶魔被驱魔状态
         # 更新日期: 2026-01-05 - 重置莽夫状态
         self.goon_chosen_tonight = False  # 重置莽夫今晚是否被选择
         
-        # 重置所有玩家的保护状态，并检查状态过期
+        # 重置所有玩家的保护状态和守鸦人触发状态
         for player in self.players:
             player["protected"] = False
+            player.pop("ravenkeeper_triggered", None)
+            player.pop("ravenkeeper_choice_made", None)
+            player.pop("ravenkeeper_result", None)
             
             # 检查醉酒状态是否过期
             if player.get("drunk") and player.get("drunk_until"):
@@ -444,6 +449,9 @@ class Game:
                 })
                 self.add_log(f"[夜间] {player['name']} 选择击杀 {target_player['name'] if target_player else '未知'}", "night")
                 
+                # 立即检查目标是否是守鸦人
+                self.check_and_trigger_ravenkeeper(target)
+                
                 # 小恶魔传刀逻辑：如果小恶魔选择自杀
                 if player and player.get("role", {}).get("id") == "imp" and target == player_id:
                     self.process_imp_suicide(player_id)
@@ -466,6 +474,7 @@ class Game:
                     "kill_type": "zombuul"
                 })
                 self.add_log(f"[夜间] {player['name']} (僵怖) 选择击杀 {target_player['name'] if target_player else '未知'}", "night")
+                self.check_and_trigger_ravenkeeper(target)
             else:
                 self.add_log(f"[夜间] {player['name']} (僵怖) 选择不击杀任何人", "night")
         
@@ -487,6 +496,7 @@ class Game:
                         "kill_type": "shabaloth"
                     })
                     self.add_log(f"[夜间] {player['name']} (沙巴洛斯) 选择击杀 {target_player['name']}", "night")
+                    self.check_and_trigger_ravenkeeper(target)
                 
                 # 第二个目标（通过 extra_data 传递）
                 second_target = extra_data.get("second_target") if extra_data else None
@@ -501,6 +511,7 @@ class Game:
                             "kill_type": "shabaloth"
                         })
                         self.add_log(f"[夜间] {player['name']} (沙巴洛斯) 选择击杀 {second_target_player['name']}", "night")
+                        self.check_and_trigger_ravenkeeper(second_target)
                 
                 # 复活（通过 extra_data 传递）
                 revive_target = extra_data.get("revive_target") if extra_data else None
@@ -547,6 +558,7 @@ class Game:
                             "kill_type": "po"
                         })
                         self.add_log(f"[夜间] {player['name']} (珀) 选择击杀 {t_player['name']}", "night")
+                        self.check_and_trigger_ravenkeeper(t)
                 
                 # 重置状态
                 self.po_skipped_last_night = False
@@ -583,6 +595,7 @@ class Game:
                                 "kill_type": "pukka_delayed"
                             })
                             self.add_log(f"[夜间] {previous_victim['name']} 因普卡的毒素死亡", "night")
+                            self.check_and_trigger_ravenkeeper(previous_victim_id)
                         else:
                             self.add_log(f"[夜间] {previous_victim['name']} 被保护，免疫普卡的毒杀", "night")
                         
@@ -918,8 +931,41 @@ class Game:
         
         return actual_deaths
     
+    def check_and_trigger_ravenkeeper(self, target_id):
+        """在记录击杀行动后立即检查目标是否是守鸦人，如果是则触发其能力"""
+        target_player = next((p for p in self.players if p["id"] == target_id), None)
+        if not target_player:
+            return
+        
+        is_ravenkeeper = (target_player.get("role") and 
+                          target_player["role"].get("id") == "ravenkeeper")
+        if not is_ravenkeeper:
+            return
+        
+        # 检查是否被保护
+        protected = getattr(self, 'protected_players', [])
+        if target_id in protected:
+            return
+        
+        # 检查是否是士兵（不会被杀）
+        if target_player.get("role", {}).get("id") == "soldier":
+            if not target_player.get("poisoned") and not target_player.get("drunk"):
+                return
+        
+        # 守鸦人未中毒/醉酒时触发（中毒/醉酒时也触发，但给假信息，由API层处理）
+        if not target_player.get("ravenkeeper_triggered"):
+            target_player["ravenkeeper_triggered"] = True
+            target_player["ravenkeeper_choice_made"] = False
+            target_player["ravenkeeper_result"] = None
+            self.add_log(f"守鸦人 {target_player['name']} 在夜间死亡，等待玩家选择查验目标", "night")
+
     def check_ravenkeeper_trigger(self):
-        """检查是否有守鸦人需要被唤醒"""
+        """检查是否有守鸦人需要被唤醒（兼容说书人端调用）"""
+        # 先处理夜间击杀（如果尚未处理），以确定谁死了、是否触发守鸦人
+        if not getattr(self, '_night_kills_processed', False):
+            self._pre_process_results = self.process_night_kills()
+            self._night_kills_processed = True
+        
         for death in getattr(self, 'demon_kills', []):
             target_id = death.get("target_id")
             target_player = next((p for p in self.players if p["id"] == target_id), None)
@@ -927,7 +973,9 @@ class Game:
                 return {
                     "triggered": True,
                     "player_id": target_id,
-                    "player_name": target_player["name"]
+                    "player_name": target_player["name"],
+                    "choice_made": target_player.get("ravenkeeper_choice_made", False),
+                    "result": target_player.get("ravenkeeper_result")
                 }
         return {"triggered": False}
     
@@ -953,8 +1001,13 @@ class Game:
         for p in self.players:
             p.pop("devils_advocate_protected", None)
         
-        # 处理恶魔击杀（考虑保护）
-        demon_deaths = self.process_night_kills()
+        # 处理恶魔击杀（考虑保护），复用守鸦人检查时的预处理结果
+        if getattr(self, '_night_kills_processed', False):
+            demon_deaths = getattr(self, '_pre_process_results', [])
+            self._night_kills_processed = False
+            self._pre_process_results = None
+        else:
+            demon_deaths = self.process_night_kills()
         for death in demon_deaths:
             if death not in self.night_deaths:
                 self.night_deaths.append(death)
@@ -1557,10 +1610,23 @@ class Game:
                 "is_drunk_or_poisoned": is_drunk_or_poisoned
             }
         
-        # 检查目标中是否有恶魔
+        target_names = " 和 ".join([t["name"] for t in target_players])
+        
+        if is_drunk_or_poisoned:
+            # 醉酒/中毒时随机给出结果（可能正确也可能错误）
+            has_demon = random.choice([True, False])
+            self.add_log(f"[系统] 占卜师 {player['name']} 处于醉酒/中毒状态，系统已自动生成随机结果", "info")
+            return {
+                "info_type": "fortune_teller",
+                "has_demon": has_demon,
+                "message": f"在 {target_names} 中，{'有' if has_demon else '没有'}恶魔",
+                "is_drunk_or_poisoned": True
+            }
+        
+        # 正常状态：检查目标中是否有恶魔
         has_demon = any(t["role_type"] == "demon" for t in target_players)
         
-        # 注意：占卜师有一个"红鲱鱼"玩家，会被误判为恶魔
+        # 红鲱鱼玩家会被误判为恶魔
         red_herring_id = player.get("red_herring_id")
         if red_herring_id and any(t["id"] == red_herring_id for t in target_players):
             has_demon = True
@@ -1568,17 +1634,15 @@ class Game:
         # 陌客可能被识别为恶魔
         for t in target_players:
             if t.get("role") and t["role"].get("id") == "recluse":
-                if random.random() < 0.5:  # 50%几率被当作恶魔
+                if random.random() < 0.5:
                     has_demon = True
                     self.add_log(f"[系统提示] 陌客 {t['name']} 被占卜师误认为恶魔", "info")
-        
-        target_names = " 和 ".join([t["name"] for t in target_players])
         
         return {
             "info_type": "fortune_teller",
             "has_demon": has_demon,
             "message": f"在 {target_names} 中，{'有' if has_demon else '没有'}恶魔",
-            "is_drunk_or_poisoned": is_drunk_or_poisoned
+            "is_drunk_or_poisoned": False
         }
     
     def _generate_clockmaker_info(self, player, is_drunk_or_poisoned=False):
