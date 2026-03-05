@@ -23,7 +23,11 @@ const playerState = {
     heartbeatInterval: null,
     messages: [],
     nightAction: null,
-    playerChoice: null
+    playerChoice: null,
+    hasActiveMessage: false,
+    messageShownAt: 0,
+    ravenkeeperTriggered: false,
+    ravenkeeperDismissed: false
 };
 
 // ==================== API 调用 ====================
@@ -262,35 +266,74 @@ function showGamePanel() {
     updateGameState();
 }
 
+// 角色图片格式优先级列表
+const ROLE_IMAGE_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg', 'svg'];
+
+// 尝试加载角色图片，支持多种格式自动尝试，失败时回退到 emoji
+function loadRoleImage(imgElement, emojiElement, roleId, fallbackEmoji) {
+    if (!roleId) {
+        imgElement.style.display = 'none';
+        emojiElement.style.display = '';
+        emojiElement.textContent = fallbackEmoji || '❓';
+        return;
+    }
+    
+    let extIndex = 0;
+    
+    function tryNextFormat() {
+        if (extIndex >= ROLE_IMAGE_EXTENSIONS.length) {
+            imgElement.style.display = 'none';
+            emojiElement.style.display = '';
+            emojiElement.textContent = fallbackEmoji || '👤';
+            return;
+        }
+        const ext = ROLE_IMAGE_EXTENSIONS[extIndex];
+        extIndex++;
+        imgElement.src = `/static/images/roles/${roleId}.${ext}`;
+    }
+    
+    imgElement.onload = function() {
+        imgElement.style.display = '';
+        emojiElement.style.display = 'none';
+    };
+    imgElement.onerror = tryNextFormat;
+    tryNextFormat();
+}
+
+const roleIcons = {
+    'washerwoman': '👗', 'librarian': '📚', 'investigator': '🔍', 'chef': '👨‍🍳',
+    'empath': '💓', 'fortune_teller': '🔮', 'undertaker': '⚰️', 'monk': '🧘',
+    'ravenkeeper': '🐦', 'virgin': '👰', 'slayer': '🗡️', 'soldier': '🛡️',
+    'mayor': '👔', 'exorcist': '✝️', 'innkeeper': '🏨', 'gambler': '🎰',
+    'gossip': '🗣️', 'courtier': '👑', 'professor': '🎓', 'minstrel': '🎵',
+    'tea_lady': '🍵', 'pacifist': '☮️', 'fool': '🃏', 'grandmother': '👵',
+    'sailor': '⚓', 'chambermaid': '🛏️', 'clockmaker': '⏰',
+    'butler': '🎩', 'drunk': '🍺', 'recluse': '🏚️', 'saint': '😇',
+    'moonchild': '🌙', 'goon': '💪', 'lunatic': '🤪', 'tinker': '🔧',
+    'poisoner': '☠️', 'spy': '🕵️', 'scarlet_woman': '💋', 'baron': '🎭',
+    'assassin': '🗡️', 'devils_advocate': '😈', 'mastermind': '🧠',
+    'godfather': '🤵', 'witch': '🧹', 'cerenovus': '👻', 'pit_hag': '🧙‍♀️',
+    'imp': '👿', 'zombuul': '🧟', 'pukka': '🐍', 'shabaloth': '🦑',
+    'po': '💀', 'vigormortis': '💉', 'fang_gu': '🦇', 'no_dashii': '🐙'
+};
+
 function updateRoleCard() {
     const role = playerState.role;
     const roleType = playerState.roleType;
     
+    const imgEl = document.getElementById('roleIconImg');
+    const emojiEl = document.getElementById('roleIcon');
+    
     if (!role) {
-        document.getElementById('roleIcon').textContent = '❓';
+        imgEl.style.display = 'none';
+        emojiEl.style.display = '';
+        emojiEl.textContent = '❓';
         document.getElementById('roleName').textContent = '等待分配';
         document.getElementById('roleType').textContent = '未知';
         document.getElementById('roleType').className = 'role-type';
         document.getElementById('roleAbility').textContent = '说书人正在分配角色...';
         return;
     }
-    
-    const roleIcons = {
-        'washerwoman': '👗', 'librarian': '📚', 'investigator': '🔍', 'chef': '👨‍🍳',
-        'empath': '💓', 'fortune_teller': '🔮', 'undertaker': '⚰️', 'monk': '🧘',
-        'ravenkeeper': '🐦', 'virgin': '👰', 'slayer': '🗡️', 'soldier': '🛡️',
-        'mayor': '👔', 'exorcist': '✝️', 'innkeeper': '🏨', 'gambler': '🎰',
-        'gossip': '🗣️', 'courtier': '👑', 'professor': '🎓', 'minstrel': '🎵',
-        'tea_lady': '🍵', 'pacifist': '☮️', 'fool': '🃏', 'grandmother': '👵',
-        'sailor': '⚓', 'chambermaid': '🛏️', 'clockmaker': '⏰',
-        'butler': '🎩', 'drunk': '🍺', 'recluse': '🏚️', 'saint': '😇',
-        'moonchild': '🌙', 'goon': '💪', 'lunatic': '🤪', 'tinker': '🔧',
-        'poisoner': '☠️', 'spy': '🕵️', 'scarlet_woman': '💋', 'baron': '🎭',
-        'assassin': '🗡️', 'devils_advocate': '😈', 'mastermind': '🧠',
-        'godfather': '🤵', 'witch': '🧹', 'cerenovus': '👻', 'pit_hag': '🧙‍♀️',
-        'imp': '👿', 'zombuul': '🧟', 'pukka': '🐍', 'shabaloth': '🦑',
-        'po': '💀', 'vigormortis': '💉', 'fang_gu': '🦇', 'no_dashii': '🐙'
-    };
     
     const roleTypeNames = {
         'townsfolk': '镇民',
@@ -299,7 +342,7 @@ function updateRoleCard() {
         'demon': '恶魔'
     };
     
-    document.getElementById('roleIcon').textContent = roleIcons[role.id] || '👤';
+    loadRoleImage(imgEl, emojiEl, role.id, roleIcons[role.id] || '👤');
     document.getElementById('roleName').textContent = role.name;
     document.getElementById('roleType').textContent = roleTypeNames[roleType] || roleType;
     document.getElementById('roleType').className = `role-type ${roleType}`;
@@ -349,7 +392,7 @@ async function pollGameState() {
     playerState.nightAction = result.night_action;
     
     // 检查是否有说书人发送的待处理行动（夜间或白天）
-    await checkPendingAction();
+    const hasPendingActionShown = await checkPendingAction();
     
     // 白天也检查是否有行动
     if (playerState.currentPhase === 'day') {
@@ -381,16 +424,37 @@ async function pollGameState() {
         hideVotingPanel();
     }
     
-    // 处理夜间
+    // 处理夜间 - 不覆盖待处理行动面板、说书人信息或守鸦人面板
     if (playerState.currentPhase === 'night') {
-        if (result.my_turn && result.night_action) {
-            showNightAction(result.night_action);
+        const messageStillActive = playerState.hasActiveMessage && 
+            (Date.now() - playerState.messageShownAt < 60000);
+        
+        // 守鸦人触发检查（优先级最高）
+        const ravenkeeperActive = playerState.ravenkeeperTriggered && !playerState.ravenkeeperDismissed;
+        if (ravenkeeperActive) {
+            // 守鸦人面板已显示，不做任何覆盖
+        } else if (hasPendingActionShown) {
+            // 待处理行动面板（选择目标/已提交等待）已显示，不覆盖
+        } else if (result.my_turn && result.night_action) {
+            if (!messageStillActive) {
+                showNightAction(result.night_action);
+            }
         } else if (result.waiting_for_action) {
-            showNightWaiting('等待轮到你的行动...');
+            if (!messageStillActive) {
+                showNightWaiting('等待轮到你的行动...');
+            }
         } else {
-            showNightWaiting();
+            if (!messageStillActive) {
+                showNightWaiting();
+            }
         }
+        
+        // 检查守鸦人是否被触发（每次轮询都检查）
+        await checkRavenkeeperTrigger();
     } else {
+        playerState.hasActiveMessage = false;
+        playerState.ravenkeeperTriggered = false;
+        playerState.ravenkeeperDismissed = false;
         hideNightPanels();
     }
     
@@ -400,18 +464,16 @@ async function pollGameState() {
     }
 }
 
-// 更新日期: 2026-01-12 - 消息统一显示在夜间行动面板中
 function handleNewMessages(messages) {
     messages.forEach(msg => {
         if (!msg.read) {
-            // 夜间结果信息显示在夜间行动面板中
             if (msg.type === 'night_result' || msg.type === 'info') {
                 displayMessageInNightPanel(msg);
+                playerState.hasActiveMessage = true;
+                playerState.messageShownAt = Date.now();
             } else {
-                // 其他类型信息用弹窗显示
                 showMessageModal(msg);
             }
-            // 标记为已读
             apiCall(`/api/player/messages/${playerState.gameId}/${playerState.playerId}/read`, 'POST', {
                 message_ids: [msg.id]
             });
@@ -776,14 +838,29 @@ async function submitDayAction(skip = false) {
     }
 }
 
-// 检查是否有说书人发送的待处理行动
+// 当前正在显示的待处理行动ID，用于避免重复渲染导致下拉框重置
+let currentPendingActionId = null;
+
+// 检查是否有说书人发送的待处理行动，返回是否有活跃的待处理行动UI
 async function checkPendingAction() {
-    if (!playerState.gameId || !playerState.playerId) return;
+    if (!playerState.gameId || !playerState.playerId) return false;
+    
+    // 如果正在显示说书人发来的信息，不要覆盖
+    if (playerState.hasActiveMessage && (Date.now() - playerState.messageShownAt < 60000)) {
+        return true;
+    }
     
     const result = await apiCall(`/api/player/pending_action/${playerState.gameId}/${playerState.playerId}`);
     
     if (result.has_pending && result.action) {
+        // 如果是同一个待处理行动且UI已在显示，跳过重新渲染
+        const actionId = result.action.created_at || result.action.player_id;
+        if (currentPendingActionId === actionId && currentPendingAction) {
+            return true;
+        }
+        
         currentPendingAction = result.action;
+        currentPendingActionId = actionId;
         
         // 根据行动类型显示不同界面
         if (result.action.config?.special === 'pit_hag') {
@@ -793,10 +870,21 @@ async function checkPendingAction() {
         } else {
             showPendingAction(result.action);
         }
+        return true;
     } else if (result.action && result.action.status === 'submitted') {
-        // 已提交，显示等待状态
+        // 如果已经在显示已提交状态，跳过重新渲染
+        const actionId = result.action.created_at || result.action.player_id;
+        if (currentPendingActionId === actionId + '_submitted') {
+            return true;
+        }
+        currentPendingActionId = actionId + '_submitted';
         showSubmittedState(result.action);
+        return true;
     }
+    
+    // 没有待处理行动，清除追踪
+    currentPendingActionId = null;
+    return false;
 }
 
 // 显示待处理行动界面
@@ -909,8 +997,12 @@ function showSubmittedState(action) {
             <span class="icon">✓</span>
             <span>${action.choice?.skipped ? '你选择跳过' : `你已选择: ${targetNames}`}</span>
         </div>
-        <p style="color: var(--text-muted); margin-top: 1rem;">选择已同步到说书人端，等待处理...</p>
+        <p style="color: var(--text-muted); margin-top: 1rem;">选择已同步到说书人端，等待说书人发送结果...</p>
     `;
+    
+    // 保持活跃状态防止被 showNightWaiting 覆盖
+    playerState.hasActiveMessage = true;
+    playerState.messageShownAt = Date.now();
 }
 
 // 提交待处理行动
@@ -956,10 +1048,15 @@ async function submitPendingAction(skip = false) {
             <span class="icon">✓</span>
             <span>${skip ? '你选择跳过' : `你已选择: ${targetNames}`}</span>
         </div>
-        <p style="color: var(--text-muted); margin-top: 1rem;">选择已同步到说书人端，等待处理...</p>
+        <p style="color: var(--text-muted); margin-top: 1rem;">选择已同步到说书人端，等待说书人发送结果...</p>
     `;
     
+    // 保持活跃状态防止被 showNightWaiting 覆盖
+    playerState.hasActiveMessage = true;
+    playerState.messageShownAt = Date.now();
+    
     currentPendingAction = null;
+    currentPendingActionId = null;
 }
 
 // ==================== 麻脸巫婆特殊行动 ====================
@@ -1149,7 +1246,11 @@ async function submitPitHagAction() {
         <p style="color: var(--text-muted); margin-top: 1rem;">选择已同步到说书人端，等待处理...</p>
     `;
     
+    playerState.hasActiveMessage = true;
+    playerState.messageShownAt = Date.now();
+    
     currentPendingAction = null;
+    currentPendingActionId = null;
 }
 
 function showNightWaiting(text) {
@@ -1340,7 +1441,402 @@ function closeModal(modalId) {
     document.getElementById(modalId).classList.remove('active');
 }
 
+// ==================== 守鸦人玩家端 ====================
+
+async function checkRavenkeeperTrigger() {
+    if (!playerState.gameId || !playerState.playerId) return;
+    if (playerState.ravenkeeperDismissed) return;
+    
+    // 只有守鸦人角色才需要检查
+    if (playerState.role?.id !== 'ravenkeeper') return;
+    
+    try {
+        const result = await apiCall(`/api/player/ravenkeeper_status/${playerState.gameId}/${playerState.playerId}`);
+        
+        if (result.triggered && !result.already_chosen && !playerState.ravenkeeperTriggered) {
+            playerState.ravenkeeperTriggered = true;
+            showRavenkeeperPanel(result.targets);
+        } else if (result.triggered && result.already_chosen && !playerState.ravenkeeperDismissed) {
+            showRavenkeeperResult(result.result);
+        }
+    } catch (e) {
+        // 忽略错误
+    }
+}
+
+function showRavenkeeperPanel(targets) {
+    const nightPanel = document.getElementById('nightActionPanel');
+    const nightContent = document.getElementById('nightActionContent');
+    const nightWaiting = document.getElementById('nightWaiting');
+    
+    nightPanel.style.display = 'block';
+    nightWaiting.style.display = 'none';
+    document.getElementById('nightActionTitle').textContent = '🐦 守鸦人 - 你在夜间死亡！';
+    
+    nightContent.innerHTML = `
+        <div style="background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0,0,0,0.5)); border: 2px solid var(--color-blood); border-radius: 12px; padding: 1.5rem; text-align: center; margin-bottom: 1rem;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">💀🐦</div>
+            <h4 style="color: var(--color-gold); margin-bottom: 0.5rem;">你在夜间被杀害了！</h4>
+            <p style="color: var(--text-secondary); line-height: 1.6;">
+                作为守鸦人，你可以在死前选择一名玩家，得知他的真实角色。
+            </p>
+        </div>
+        
+        <div class="target-select-group">
+            <label style="color: var(--color-gold); font-weight: bold;">选择要查验的玩家:</label>
+            <select id="ravenkeeperTarget" class="form-select" style="margin-top: 0.5rem;">
+                <option value="">-- 选择一名玩家 --</option>
+                ${targets.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+            </select>
+        </div>
+        
+        <button class="btn btn-primary" onclick="submitRavenkeeperChoice()" 
+                style="margin-top: 1.5rem; width: 100%; font-size: 1.1rem; padding: 0.8rem;">
+            🔍 查验该玩家的角色
+        </button>
+    `;
+}
+
+async function submitRavenkeeperChoice() {
+    const targetId = document.getElementById('ravenkeeperTarget')?.value;
+    if (!targetId) {
+        showToast('请选择一名玩家');
+        return;
+    }
+    
+    const result = await apiCall('/api/player/ravenkeeper_choose', 'POST', {
+        game_id: playerState.gameId,
+        player_id: playerState.playerId,
+        target_id: parseInt(targetId)
+    });
+    
+    if (result.error) {
+        showToast(result.error);
+        return;
+    }
+    
+    if (result.success && result.result) {
+        showRavenkeeperResult(result.result);
+    }
+}
+
+function showRavenkeeperResult(resultData) {
+    const nightPanel = document.getElementById('nightActionPanel');
+    const nightContent = document.getElementById('nightActionContent');
+    const nightWaiting = document.getElementById('nightWaiting');
+    
+    nightPanel.style.display = 'block';
+    nightWaiting.style.display = 'none';
+    document.getElementById('nightActionTitle').textContent = '🐦 守鸦人 - 查验结果';
+    
+    playerState.ravenkeeperTriggered = true;
+    playerState.hasActiveMessage = true;
+    playerState.messageShownAt = Date.now();
+    
+    nightContent.innerHTML = `
+        <div style="background: linear-gradient(135deg, rgba(52, 152, 219, 0.2), rgba(0,0,0,0.3)); border: 2px solid #3498db; border-radius: 12px; padding: 2rem; text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">🐦🔍</div>
+            <h4 style="color: var(--color-gold); margin-bottom: 1rem;">查验结果</h4>
+            <div style="font-size: 1.5rem; color: var(--text-primary); line-height: 1.8; padding: 1.5rem; background: rgba(0,0,0,0.4); border-radius: 8px; border: 1px solid var(--color-gold);">
+                <p style="margin-bottom: 0.5rem;"><strong>${resultData.target_name}</strong> 的角色是</p>
+                <p style="font-size: 2rem; color: var(--color-gold); font-weight: bold;">${resultData.role_name}</p>
+            </div>
+            <p style="color: var(--text-muted); margin-top: 1.5rem; font-size: 0.9rem;">
+                你已死亡，请记住这个信息。等待说书人进入白天阶段...
+            </p>
+        </div>
+    `;
+    
+    playerState.ravenkeeperDismissed = true;
+}
+
+// ==================== 语音接口 ====================
+
+const voiceState = {
+    ttsEnabled: false,
+    sttEnabled: false,
+    ttsVoice: null,
+    recognition: null,
+    speaking: false
+};
+
+function initVoice() {
+    // TTS: 使用 Web Speech API SpeechSynthesis
+    if ('speechSynthesis' in window) {
+        voiceState.ttsEnabled = true;
+        window.speechSynthesis.onvoiceschanged = () => {
+            const voices = window.speechSynthesis.getVoices();
+            voiceState.ttsVoice = voices.find(v => v.lang.startsWith('zh')) || voices[0];
+        };
+    }
+
+    // STT: 使用 Web Speech API SpeechRecognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+        voiceState.sttEnabled = true;
+        voiceState.recognition = new SpeechRecognition();
+        voiceState.recognition.lang = 'zh-CN';
+        voiceState.recognition.continuous = false;
+        voiceState.recognition.interimResults = false;
+
+        voiceState.recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            handleVoiceCommand(transcript);
+        };
+
+        voiceState.recognition.onerror = (event) => {
+            console.error('语音识别错误:', event.error);
+            showToast('语音识别失败: ' + event.error);
+        };
+    }
+}
+
+function speakText(text) {
+    if (!voiceState.ttsEnabled || voiceState.speaking) return;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 0.9;
+    utterance.pitch = 1.0;
+    if (voiceState.ttsVoice) utterance.voice = voiceState.ttsVoice;
+
+    utterance.onstart = () => { voiceState.speaking = true; };
+    utterance.onend = () => { voiceState.speaking = false; };
+    utterance.onerror = () => { voiceState.speaking = false; };
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+}
+
+function startListening() {
+    if (!voiceState.sttEnabled || !voiceState.recognition) {
+        showToast('语音识别不可用');
+        return;
+    }
+    try {
+        voiceState.recognition.start();
+        showToast('🎤 正在听...');
+    } catch (e) {
+        console.error('启动语音识别失败:', e);
+    }
+}
+
+function stopListening() {
+    if (voiceState.recognition) {
+        voiceState.recognition.stop();
+    }
+}
+
+function handleVoiceCommand(transcript) {
+    showToast(`🎤 识别: ${transcript}`);
+
+    const text = transcript.toLowerCase();
+
+    // 投票语音指令
+    if (text.includes('赞成') || text.includes('同意') || text.includes('投票赞成')) {
+        const yesBtn = document.getElementById('voteYesBtn');
+        if (yesBtn && !yesBtn.disabled) yesBtn.click();
+        return;
+    }
+    if (text.includes('反对') || text.includes('不同意') || text.includes('投票反对')) {
+        const noBtn = document.getElementById('voteNoBtn');
+        if (noBtn && !noBtn.disabled) noBtn.click();
+        return;
+    }
+
+    // 夜间行动 - 选择目标
+    if (text.includes('选择') || text.includes('目标')) {
+        const playerName = extractPlayerName(text);
+        if (playerName) {
+            selectTargetByName(playerName);
+        }
+        return;
+    }
+
+    // 跳过行动
+    if (text.includes('跳过') || text.includes('不选择') || text.includes('不行动')) {
+        const skipBtn = document.querySelector('[onclick*="submitPendingAction(true)"]');
+        if (skipBtn) skipBtn.click();
+        return;
+    }
+
+    // 确认选择
+    if (text.includes('确认') || text.includes('提交')) {
+        const confirmBtn = document.querySelector('[onclick*="submitPendingAction()"]');
+        if (confirmBtn) confirmBtn.click();
+        return;
+    }
+}
+
+function extractPlayerName(text) {
+    for (const player of playerState.players) {
+        if (text.includes(player.name.toLowerCase()) || text.includes(player.name)) {
+            return player.name;
+        }
+    }
+    return null;
+}
+
+function selectTargetByName(name) {
+    const player = playerState.players.find(p => p.name === name);
+    if (!player) return;
+
+    // 尝试设置各种可能的下拉框
+    const selects = ['pendingTarget', 'pendingTarget1', 'nightTarget', 'nightTarget1', 'dayActionTarget', 'pitHagTarget'];
+    for (const selectId of selects) {
+        const select = document.getElementById(selectId);
+        if (select) {
+            const option = Array.from(select.options).find(o => o.value == player.id);
+            if (option) {
+                select.value = player.id;
+                showToast(`已选择: ${name}`);
+                return;
+            }
+        }
+    }
+}
+
+// 在收到说书人信息时自动朗读
+const originalHandleNewMessages = handleNewMessages;
+handleNewMessages = function(messages) {
+    originalHandleNewMessages(messages);
+    messages.forEach(msg => {
+        if (msg.type === 'night_result' || msg.type === 'info') {
+            if (voiceState.ttsEnabled) {
+                const plainText = msg.content.replace(/<[^>]*>/g, '');
+                speakText(plainText);
+            }
+        }
+    });
+};
+
+// ==================== 服务器连接接口 ====================
+
+const serverConnection = {
+    mode: 'local',
+    remoteUrl: null,
+    wsConnection: null,
+    reconnectTimer: null,
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 10
+};
+
+async function initServerConnection() {
+    try {
+        const config = await apiCall('/api/server/config');
+        if (config.mode) {
+            serverConnection.mode = config.mode;
+            serverConnection.remoteUrl = config.remote_url;
+
+            if (config.websocket_url && config.mode !== 'local') {
+                connectWebSocket(config.websocket_url);
+            }
+        }
+    } catch (e) {
+        console.log('服务器配置加载失败，使用本地模式');
+    }
+}
+
+function connectWebSocket(wsUrl) {
+    if (!wsUrl) return;
+
+    try {
+        serverConnection.wsConnection = new WebSocket(wsUrl);
+
+        serverConnection.wsConnection.onopen = () => {
+            console.log('WebSocket已连接');
+            serverConnection.reconnectAttempts = 0;
+            if (playerState.gameId && playerState.playerId) {
+                serverConnection.wsConnection.send(JSON.stringify({
+                    type: 'join',
+                    game_id: playerState.gameId,
+                    player_id: playerState.playerId
+                }));
+            }
+        };
+
+        serverConnection.wsConnection.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            } catch (e) {
+                console.error('WebSocket消息解析失败:', e);
+            }
+        };
+
+        serverConnection.wsConnection.onclose = () => {
+            console.log('WebSocket断开');
+            scheduleReconnect(wsUrl);
+        };
+
+        serverConnection.wsConnection.onerror = (error) => {
+            console.error('WebSocket错误:', error);
+        };
+    } catch (e) {
+        console.error('WebSocket连接失败:', e);
+    }
+}
+
+function scheduleReconnect(wsUrl) {
+    if (serverConnection.reconnectAttempts >= serverConnection.maxReconnectAttempts) {
+        console.log('WebSocket重连次数已达上限');
+        return;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, serverConnection.reconnectAttempts), 30000);
+    serverConnection.reconnectAttempts++;
+
+    serverConnection.reconnectTimer = setTimeout(() => {
+        connectWebSocket(wsUrl);
+    }, delay);
+}
+
+function handleWebSocketMessage(data) {
+    switch (data.type) {
+        case 'phase_change':
+            playerState.currentPhase = data.phase;
+            updateGameState();
+            break;
+        case 'night_action':
+            if (data.player_id === playerState.playerId) {
+                showPendingAction(data.action);
+            }
+            break;
+        case 'message':
+            if (data.player_id === playerState.playerId) {
+                handleNewMessages([data.message]);
+            }
+            break;
+        case 'game_end':
+            showGameEnd(data.game_end);
+            break;
+        case 'nomination':
+            if (data.nomination) {
+                showVotingPanel(data.nomination);
+            }
+            break;
+    }
+}
+
+function sendViaWebSocket(data) {
+    if (serverConnection.wsConnection?.readyState === WebSocket.OPEN) {
+        serverConnection.wsConnection.send(JSON.stringify(data));
+        return true;
+    }
+    return false;
+}
+
+// 初始化语音和服务器连接
+document.addEventListener('DOMContentLoaded', () => {
+    initVoice();
+    initServerConnection();
+});
+
 // 暴露给HTML调用
 window.selectPlayer = selectPlayer;
 window.submitNightAction = submitNightAction;
 window.closeModal = closeModal;
+window.startListening = startListening;
+window.stopListening = stopListening;
+window.speakText = speakText;
+window.submitRavenkeeperChoice = submitRavenkeeperChoice;

@@ -1854,6 +1854,7 @@ async function handleNightAction(index) {
     // 组合完整内容
     infoContent.innerHTML = `
         ${headerHTML}
+        <div id="livePlayerChoiceArea"></div>
         ${actionUI}
         <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-md); justify-content: center; flex-wrap: wrap;">
             ${buttonsHTML}
@@ -1863,6 +1864,94 @@ async function handleNightAction(index) {
     `;
     
     showModal('infoModal');
+    
+    // 启动模态框内的实时轮询，持续检查玩家是否提交了新选择
+    startModalChoicePolling(item.player_id, index);
+}
+
+// 模态框内实时轮询玩家选择
+let modalChoicePollingTimer = null;
+
+function startModalChoicePolling(playerId, nightIndex) {
+    stopModalChoicePolling();
+    
+    const poll = async () => {
+        if (!gameState.gameId || gameState.currentPhase !== 'night') {
+            stopModalChoicePolling();
+            return;
+        }
+        
+        try {
+            const choicesResult = await apiCall(`/api/storyteller/player_choices/${gameState.gameId}`);
+            if (choicesResult.choices && choicesResult.choices[playerId]) {
+                const choice = choicesResult.choices[playerId];
+                if (!choice.confirmed) {
+                    const area = document.getElementById('livePlayerChoiceArea');
+                    if (area && !area.dataset.shown) {
+                        area.dataset.shown = 'true';
+                        
+                        // 预设选择到当前目标
+                        if (choice.targets && choice.targets.length > 0) {
+                            currentNightActionTarget = choice.targets[0];
+                            if (choice.targets.length > 1) {
+                                currentNightActionSecondTarget = choice.targets[1];
+                            }
+                        }
+                        
+                        // 信息类角色（需要生成信息）：重新渲染整个行动面板
+                        const item = gameState.nightOrder[nightIndex];
+                        const infoSelectRoles = ['fortune_teller', 'seamstress', 'chambermaid', 'dreamer'];
+                        if (item && item.action_type === 'info_select' && infoSelectRoles.includes(item.role_id)) {
+                            stopModalChoicePolling();
+                            showToast('📱 玩家已提交选择，正在生成信息...');
+                            await handleNightAction(nightIndex);
+                            return;
+                        }
+                        
+                        const targetNames = choice.target_names?.join(', ') || (choice.skipped ? '跳过' : '无');
+                        const extraData = choice.extra_data || {};
+                        
+                        let extraInfo = '';
+                        if (extraData.new_role_name) {
+                            extraInfo = `<p style="color: var(--text-primary);">新角色: <strong>${extraData.new_role_name}</strong></p>`;
+                        }
+                        
+                        area.innerHTML = `
+                            <div style="padding: var(--spacing-md); background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; border-radius: var(--radius-md); margin-bottom: var(--spacing-md); animation: fadeIn 0.3s ease;">
+                                <p style="color: #3498db; margin-bottom: var(--spacing-sm);">📱 玩家端已提交选择</p>
+                                <p style="color: var(--text-primary);">选择目标: <strong>${choice.skipped ? '跳过行动' : targetNames}</strong></p>
+                                ${extraInfo}
+                                <p style="font-size: 0.8rem; color: var(--text-muted);">提交时间: ${new Date(choice.submitted_at).toLocaleTimeString()}</p>
+                                <button class="btn btn-secondary" onclick="usePlayerChoice(${playerId})" style="margin-top: var(--spacing-sm); font-size: 0.85rem;">
+                                    使用玩家选择
+                                </button>
+                            </div>
+                        `;
+                        
+                        // 尝试同步到下拉框
+                        const targetSelect = document.getElementById('nightActionTarget');
+                        if (targetSelect) targetSelect.value = choice.targets[0];
+                        const secondSelect = document.getElementById('nightActionSecondTarget');
+                        if (secondSelect && choice.targets[1]) secondSelect.value = choice.targets[1];
+                        
+                        showToast('📱 玩家已提交选择');
+                        stopModalChoicePolling();
+                    }
+                }
+            }
+        } catch (e) {
+            // 忽略轮询错误
+        }
+    };
+    
+    modalChoicePollingTimer = setInterval(poll, 2000);
+}
+
+function stopModalChoicePolling() {
+    if (modalChoicePollingTimer) {
+        clearInterval(modalChoicePollingTimer);
+        modalChoicePollingTimer = null;
+    }
 }
 
 function updateNightActionTarget(value) {
@@ -2034,6 +2123,9 @@ async function generateInfoForTarget() {
 async function skipNightAction(index) {
     const item = gameState.nightOrder[index];
     
+    stopNightChoicePolling();
+    stopModalChoicePolling();
+    
     // 记录跳过的行动
     await apiCall(`/api/game/${gameState.gameId}/night_action`, 'POST', {
         player_id: item.player_id,
@@ -2055,11 +2147,14 @@ async function skipNightAction(index) {
     
     addLogEntry(`${item.player_name} (${item.role_name}) 选择不行动`, 'night');
     
-    // 更新日期: 2026-01-12 - 自动通知下一位玩家行动
+    // 自动通知下一位玩家行动
     await notifyNextPlayerAction(gameState.currentNightIndex);
 }
 
 async function completeNightActionWithTarget(index) {
+    stopNightChoicePolling();
+    stopModalChoicePolling();
+    
     const item = gameState.nightOrder[index];
     const target = currentNightActionTarget;
     const secondTarget = currentNightActionSecondTarget;
@@ -2338,32 +2433,32 @@ async function completeNightActionWithTarget(index) {
     await notifyNextPlayerAction(gameState.currentNightIndex);
 }
 
-// 更新日期: 2026-01-12 - 自动通知下一位玩家行动
+// 自动通知下一位玩家行动（支持跳过离线玩家）
 async function notifyNextPlayerAction(nextIndex) {
     if (!gameState.nightOrder || nextIndex >= gameState.nightOrder.length) {
-        return; // 没有下一位了
+        return;
     }
     
     const nextItem = gameState.nightOrder[nextIndex];
     const nextPlayer = gameState.players.find(p => p.id === nextItem.player_id);
-    
-    if (!nextPlayer || !nextPlayer.online) {
-        return; // 玩家不在线
-    }
     
     // 确定行动配置
     const actionConfig = {
         max_targets: 1,
         can_skip: true,
         use_alive_only: true,
-        description: nextItem.ability || nextPlayer.role?.ability || ''
+        description: nextItem.ability || nextPlayer?.role?.ability || ''
     };
     
     // 根据不同角色调整配置
     const roleId = nextItem.role_id;
     const actionType = nextItem.action_type;
     
-    if (roleId === 'fortune_teller' || actionType === 'investigate') {
+    if (roleId === 'fortune_teller') {
+        actionConfig.max_targets = 2;
+        actionConfig.use_alive_only = false;
+        actionConfig.description = '选择两名玩家进行占卜，你会得知他们中是否有恶魔';
+    } else if (actionType === 'investigate') {
         actionConfig.max_targets = 2;
         actionConfig.description = '选择两名玩家，你会得知他们中是否有恶魔';
     } else if (actionType === 'shabaloth_kill') {
@@ -2385,7 +2480,7 @@ async function notifyNextPlayerAction(nextIndex) {
         actionConfig.can_select = false;
     }
     
-    // 发送通知到玩家端
+    // 即使玩家离线也发送通知（玩家上线后会收到）
     await apiCall('/api/storyteller/notify_action', 'POST', {
         game_id: gameState.gameId,
         player_id: nextItem.player_id,
@@ -2393,13 +2488,78 @@ async function notifyNextPlayerAction(nextIndex) {
         action_config: actionConfig
     });
     
-    addLogEntry(`📱 已通知 ${nextPlayer.name} 进行行动`, 'info');
+    const onlineStatus = nextPlayer?.online ? '' : ' (离线，等待上线)';
+    addLogEntry(`📱 已通知 ${nextPlayer?.name || '玩家'} 进行行动${onlineStatus}`, 'info');
+    
+    // 启动轮询，等待该玩家提交选择
+    startNightChoicePolling(nextItem.player_id, nextIndex);
+}
+
+// 夜间选择轮询 - 自动检测玩家提交并通知说书人
+let nightChoicePollingTimer = null;
+let nightChoicePollingPlayerId = null;
+
+function startNightChoicePolling(playerId, nightIndex) {
+    stopNightChoicePolling();
+    nightChoicePollingPlayerId = playerId;
+    
+    const poll = async () => {
+        if (!gameState.gameId || gameState.currentPhase !== 'night') {
+            stopNightChoicePolling();
+            return;
+        }
+        
+        try {
+            const result = await apiCall(`/api/storyteller/night_progress/${gameState.gameId}`);
+            if (!result || result.error) return;
+            
+            const submitted = result.submitted_choices || {};
+            const choice = submitted[playerId];
+            
+            if (choice && !choice.confirmed) {
+                // 玩家已提交选择 - 更新说书人界面上的提示
+                updateNightOrderWithChoice(playerId, nightIndex, choice);
+            }
+        } catch (e) {
+            console.error('轮询玩家选择失败:', e);
+        }
+    };
+    
+    poll();
+    nightChoicePollingTimer = setInterval(poll, 2000);
+}
+
+function stopNightChoicePolling() {
+    if (nightChoicePollingTimer) {
+        clearInterval(nightChoicePollingTimer);
+        nightChoicePollingTimer = null;
+    }
+    nightChoicePollingPlayerId = null;
+}
+
+function updateNightOrderWithChoice(playerId, nightIndex, choice) {
+    const item = gameState.nightOrder[nightIndex];
+    if (!item || item.player_id !== playerId) return;
+    
+    // 在夜间顺序列表中标记该玩家已提交
+    const orderItems = document.querySelectorAll('.night-order-item');
+    const targetItem = orderItems[nightIndex];
+    if (targetItem && !targetItem.querySelector('.player-choice-badge')) {
+        const badge = document.createElement('div');
+        badge.className = 'player-choice-badge';
+        badge.style.cssText = 'background: rgba(52,152,219,0.3); border: 1px solid #3498db; border-radius: 4px; padding: 2px 8px; font-size: 0.8rem; color: #3498db; margin-top: 4px;';
+        const targetNames = choice.target_names?.join(', ') || (choice.skipped ? '跳过' : '无');
+        badge.textContent = `📱 已选择: ${targetNames}`;
+        targetItem.querySelector('.night-order-info')?.appendChild(badge);
+    }
 }
 
 // completeNightAction 已被 completeNightActionWithTarget 替代
 
-// 更新日期: 2026-01-02 - 添加小恶魔传刀和红唇女郎显示
 async function startDay() {
+    stopNightChoicePolling();
+    stopModalChoicePolling();
+    
     // 检查镇长替死
     const mayorCheck = await checkMayorSubstitute();
     if (mayorCheck === 'cancelled') {
@@ -3042,8 +3202,13 @@ async function checkRavenkeeperTrigger() {
     const result = await apiCall(`/api/game/${gameState.gameId}/check_ravenkeeper`);
     
     if (result.triggered) {
-        // 显示守鸦人选择弹窗
-        await showRavenkeeperModal(result.player_id, result.player_name);
+        if (result.choice_made && result.result) {
+            // 玩家已在自己的设备上完成了选择，直接显示结果
+            addLogEntry(`🐦 守鸦人 ${result.player_name} 查验了 ${result.result.target_name}，得知角色为 ${result.result.role_name}`, 'night');
+        } else {
+            // 玩家尚未选择，显示说书人端弹窗（备用方案）
+            await showRavenkeeperModal(result.player_id, result.player_name);
+        }
     }
 }
 
@@ -3645,6 +3810,52 @@ function closeMoonchildModal() {
     closeModal('moonchildModal');
 }
 
+// ===== 角色图片加载 =====
+const ROLE_IMG_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg', 'svg'];
+
+function tryLoadRoleImageIntoAvatar(containerEl, roleId, fallbackEmoji) {
+    let extIndex = 0;
+    const img = new Image();
+    
+    function tryNext() {
+        if (extIndex >= ROLE_IMG_EXTENSIONS.length) return;
+        img.src = `/static/images/roles/${roleId}.${ROLE_IMG_EXTENSIONS[extIndex]}`;
+        extIndex++;
+    }
+    
+    img.onload = function() {
+        containerEl.textContent = '';
+        containerEl.appendChild(img);
+    };
+    img.onerror = tryNext;
+    tryNext();
+}
+
+// 为动态生成的 HTML 提供角色图片 <img> 标签（带 onerror 回退）
+function getRoleImageHTML(roleId, fallbackEmoji, size) {
+    size = size || 80;
+    if (!roleId) return `<span style="font-size: ${size * 0.6}px;">${fallbackEmoji || '👤'}</span>`;
+    const fallback = (fallbackEmoji || '👤').replace(/'/g, "\\'");
+    return `<img src="/static/images/roles/${roleId}.png"
+        style="width: ${size}px; height: ${size}px; object-fit: contain;"
+        onerror="this.onerror=null; tryRoleImageFallback(this, '${roleId}', '${fallback}', 1);"
+        alt="${roleId}">`;
+}
+
+function tryRoleImageFallback(imgEl, roleId, fallbackEmoji, extIdx) {
+    if (extIdx >= ROLE_IMG_EXTENSIONS.length) {
+        const span = document.createElement('span');
+        span.style.fontSize = imgEl.style.width ? (parseInt(imgEl.style.width) * 0.6) + 'px' : '2.5rem';
+        span.textContent = fallbackEmoji || '👤';
+        imgEl.parentNode.replaceChild(span, imgEl);
+        return;
+    }
+    imgEl.onerror = function() {
+        tryRoleImageFallback(imgEl, roleId, fallbackEmoji, extIdx + 1);
+    };
+    imgEl.src = `/static/images/roles/${roleId}.${ROLE_IMG_EXTENSIONS[extIdx]}`;
+}
+
 // ===== 玩家详情 =====
 function openPlayerDetail(playerId) {
     console.log('openPlayerDetail called with playerId:', playerId); // 调试日志
@@ -3665,10 +3876,14 @@ function openPlayerDetail(playerId) {
     };
     
     const avatarClass = player.alive ? '' : 'dead';
-    const avatarIcon = player.alive ? '👤' : '💀';
+    const avatarEmoji = player.alive ? '👤' : '💀';
+    const roleId = player.role?.id;
+    
+    // 角色图片带 emoji 回退：先显示 emoji，JS 异步尝试加载图片
+    const avatarId = `avatar_${player.id}_${Date.now()}`;
     
     document.getElementById('playerDetailContent').innerHTML = `
-        <div class="player-detail-avatar ${avatarClass}">${avatarIcon}</div>
+        <div class="player-detail-avatar ${avatarClass}" id="${avatarId}">${avatarEmoji}</div>
         <div class="player-detail-role" style="color: var(--color-${player.role_type || 'text-primary'});">
             ${player.role?.name || '未分配角色'}
         </div>
@@ -3699,6 +3914,14 @@ function openPlayerDetail(playerId) {
             <button class="btn btn-secondary" onclick="generatePlayerInfo(${player.id})">🔮 生成信息</button>
         </div>
     `;
+    
+    // 尝试加载角色图片替换 emoji 头像
+    if (roleId) {
+        const avatarDiv = document.getElementById(avatarId);
+        if (avatarDiv) {
+            tryLoadRoleImageIntoAvatar(avatarDiv, roleId, avatarEmoji);
+        }
+    }
     
     showModal('playerDetailModal');
 }
@@ -3829,6 +4052,9 @@ function showModal(modalId) {
 
 function closeModal(modalId) {
     document.getElementById(modalId).classList.remove('show');
+    if (modalId === 'infoModal') {
+        stopModalChoicePolling();
+    }
 }
 
 // 点击弹窗外部关闭
@@ -4217,4 +4443,93 @@ function addSendMessageButton(playerId, playerName) {
             📤 发送信息给该玩家
         </button>
     `;
+}
+
+// ==================== 说书人端语音接口 ====================
+
+const storytellerVoice = {
+    ttsEnabled: false,
+    ttsVoice: null,
+    speaking: false,
+    autoRead: false
+};
+
+function initStorytellerVoice() {
+    if ('speechSynthesis' in window) {
+        storytellerVoice.ttsEnabled = true;
+        window.speechSynthesis.onvoiceschanged = () => {
+            const voices = window.speechSynthesis.getVoices();
+            storytellerVoice.ttsVoice = voices.find(v => v.lang.startsWith('zh')) || voices[0];
+        };
+    }
+}
+
+function storytellerSpeak(text) {
+    if (!storytellerVoice.ttsEnabled || storytellerVoice.speaking) return;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 0.85;
+    utterance.pitch = 0.9;
+    if (storytellerVoice.ttsVoice) utterance.voice = storytellerVoice.ttsVoice;
+
+    utterance.onstart = () => { storytellerVoice.speaking = true; };
+    utterance.onend = () => { storytellerVoice.speaking = false; };
+    utterance.onerror = () => { storytellerVoice.speaking = false; };
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+}
+
+function toggleAutoRead() {
+    storytellerVoice.autoRead = !storytellerVoice.autoRead;
+    const btn = document.getElementById('autoReadBtn');
+    if (btn) {
+        btn.textContent = storytellerVoice.autoRead ? '🔊 自动朗读: 开' : '🔇 自动朗读: 关';
+        btn.style.borderColor = storytellerVoice.autoRead ? '#27ae60' : 'var(--color-blood)';
+    }
+    showToast(storytellerVoice.autoRead ? '自动朗读已开启' : '自动朗读已关闭');
+}
+
+// 增强 addLogEntry，支持自动朗读
+const _originalAddLogEntry = typeof addLogEntry === 'function' ? addLogEntry : null;
+if (_originalAddLogEntry) {
+    const _wrappedAddLogEntry = addLogEntry;
+    addLogEntry = function(message, type) {
+        _wrappedAddLogEntry(message, type);
+        if (storytellerVoice.autoRead && ['phase', 'death', 'execution', 'game_event'].includes(type)) {
+            const plainText = message.replace(/<[^>]*>/g, '').replace(/[🌙☀️💀🗡️⚡🔥👹🧙‍♀️📱✓⚠️]/g, '');
+            storytellerSpeak(plainText);
+        }
+    };
+}
+
+initStorytellerVoice();
+
+// ==================== 说书人端服务器连接接口 ====================
+
+async function checkServerHealth() {
+    try {
+        const result = await apiCall('/api/server/health');
+        return result;
+    } catch (e) {
+        return { status: 'error', message: e.message };
+    }
+}
+
+async function syncToRemoteServer() {
+    if (!gameState.gameId) return;
+    
+    try {
+        const result = await apiCall('/api/server/sync_state', 'POST', {
+            game_id: gameState.gameId
+        });
+        if (result.success) {
+            showToast('游戏状态已同步');
+        } else {
+            showToast(result.message || '同步失败');
+        }
+    } catch (e) {
+        showToast('同步失败: ' + e.message);
+    }
 }
