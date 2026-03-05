@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>血染钟楼 - 玩家端</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* 玩家端专用样式 */
+        .join-panel {
+            max-width: 500px;
+            margin: 2rem auto;
+            padding: 2rem;
+        }
+        
+        .game-code-input {
+            font-size: 1.5rem;
+            text-align: center;
+            letter-spacing: 0.5rem;
+            text-transform: uppercase;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid var(--color-blood);
+            border-radius: var(--radius-md);
+            color: var(--color-gold);
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+        
+        .game-code-input::placeholder {
+            letter-spacing: normal;
+            color: var(--text-muted);
+        }
+        
+        .player-select-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        
+        .player-select-card {
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid transparent;
+            border-radius: var(--radius-md);
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .player-select-card:hover {
+            background: rgba(139, 0, 0, 0.2);
+            border-color: var(--color-blood);
+        }
+        
+        .player-select-card.selected {
+            background: rgba(139, 0, 0, 0.4);
+            border-color: var(--color-gold);
+        }
+        
+        .player-select-card.taken {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        
+        .player-select-card .seat-number {
+            font-size: 1.5rem;
+            color: var(--color-gold);
+            margin-bottom: 0.5rem;
+        }
+        
+        .player-select-card .player-name {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        
+        /* 角色卡片 */
+        .role-card-large {
+            background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0, 0, 0, 0.5));
+            border: 2px solid var(--color-blood);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            text-align: center;
+            margin: 1rem auto;
+            max-width: 400px;
+        }
+        
+        .role-card-large .role-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        
+        .role-card-large .role-icon-img {
+            width: 100px;
+            height: 100px;
+            object-fit: contain;
+            margin-bottom: 1rem;
+            border-radius: 12px;
+        }
+        
+        .role-card-large .role-name {
+            font-size: 2rem;
+            color: var(--color-gold);
+            font-family: 'Cinzel', serif;
+            margin-bottom: 0.5rem;
+        }
+        
+        .role-card-large .role-type {
+            font-size: 1rem;
+            padding: 0.3rem 1rem;
+            border-radius: 1rem;
+            display: inline-block;
+            margin-bottom: 1rem;
+        }
+        
+        .role-card-large .role-type.townsfolk { background: rgba(39, 174, 96, 0.3); color: var(--color-townsfolk); }
+        .role-card-large .role-type.outsider { background: rgba(52, 152, 219, 0.3); color: var(--color-outsider); }
+        .role-card-large .role-type.minion { background: rgba(155, 89, 182, 0.3); color: var(--color-minion); }
+        .role-card-large .role-type.demon { background: rgba(192, 57, 43, 0.3); color: var(--color-demon); }
+        
+        .role-card-large .role-ability {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: var(--radius-md);
+        }
+        
+        /* 动画效果 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* 玩家视角圆桌 */
+        .player-view-circle {
+            position: relative;
+            width: min(90vw, 600px);
+            height: min(90vw, 600px);
+            margin: 1rem auto;
+        }
+        
+        .player-seat-view {
+            position: absolute;
+            width: 70px;
+            height: 70px;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid var(--color-blood);
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        
+        .player-seat-view.self {
+            border-color: var(--color-gold);
+            box-shadow: 0 0 20px rgba(212, 175, 55, 0.5);
+        }
+        
+        .player-seat-view.dead {
+            opacity: 0.5;
+            background: rgba(50, 50, 50, 0.5);
+        }
+        
+        .player-seat-view .seat-name {
+            font-size: 0.75rem;
+            color: var(--text-primary);
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 60px;
+        }
+        
+        .player-seat-view .seat-status {
+            font-size: 1.2rem;
+        }
+        
+        /* 游戏状态面板 */
+        .game-status-panel {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--color-blood);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+        
+        .status-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .phase-badge {
+            padding: 0.5rem 1.5rem;
+            border-radius: 2rem;
+            font-weight: 600;
+        }
+        
+        .phase-badge.day {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: #000;
+        }
+        
+        .phase-badge.night {
+            background: linear-gradient(135deg, #2c3e50, #1a252f);
+            color: #ecf0f1;
+            border: 1px solid #34495e;
+        }
+        
+        /* 投票面板 */
+        .voting-panel {
+            background: rgba(139, 0, 0, 0.2);
+            border: 1px solid var(--color-blood);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+        
+        .vote-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+        
+        .vote-btn {
+            padding: 1rem 3rem;
+            font-size: 1.2rem;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .vote-btn.yes {
+            background: linear-gradient(135deg, #27ae60, #2ecc71);
+            border: none;
+            color: white;
+        }
+        
+        .vote-btn.no {
+            background: linear-gradient(135deg, #c0392b, #e74c3c);
+            border: none;
+            color: white;
+        }
+        
+        .vote-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .vote-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* 夜间等待 */
+        .night-waiting {
+            text-align: center;
+            padding: 3rem;
+        }
+        
+        .night-waiting .moon-icon {
+            font-size: 5rem;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+        
+        /* 夜间行动面板 */
+        .night-action-player-panel {
+            background: rgba(44, 62, 80, 0.5);
+            border: 2px solid var(--color-gold);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            margin: 1rem 0;
+        }
+        
+        /* 连接状态 */
+        .connection-status {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .connection-status.connected {
+            background: rgba(39, 174, 96, 0.3);
+            color: var(--color-alive);
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(192, 57, 43, 0.3);
+            color: var(--color-dead);
+        }
+        
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: blink 1.5s infinite;
+        }
+        
+        .connected .connection-dot {
+            background: var(--color-alive);
+        }
+        
+        .disconnected .connection-dot {
+            background: var(--color-dead);
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        
+        /* 信息提示 */
+        .info-banner {
+            background: linear-gradient(135deg, rgba(52, 152, 219, 0.2), rgba(41, 128, 185, 0.3));
+            border: 1px solid #3498db;
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin: 1rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .info-banner .icon {
+            font-size: 1.5rem;
+        }
+        
+        /* 公开日志 */
+        .public-log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        
+        .public-log-entry {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
+        }
+        
+        .public-log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .public-log-entry.death {
+            color: var(--color-dead);
+        }
+        
+        .public-log-entry.execution {
+            color: var(--color-blood);
+        }
+        
+        .public-log-entry.phase {
+            color: var(--color-gold);
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .player-view-circle {
+                width: 95vw;
+                height: 95vw;
+            }
+            
+            .player-seat-view {
+                width: 50px;
+                height: 50px;
+            }
+            
+            .player-seat-view .seat-name {
+                font-size: 0.65rem;
+                max-width: 45px;
+            }
+            
+            .role-card-large {
+                padding: 1.5rem;
+            }
+            
+            .role-card-large .role-icon {
+                font-size: 3rem;
+            }
+            
+            .role-card-large .role-icon-img {
+                width: 80px;
+                height: 80px;
+            }
+            
+            .role-card-large .role-name {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    <div class="app-container">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🩸</span>
+                    <h1>血染钟楼</h1>
+                    <span class="subtitle">玩家端</span>
+                </div>
+                <div class="game-info" id="gameInfo" style="display: none;">
+                    <span class="player-name-display" id="playerNameDisplay"></span>
+                    <span class="phase-indicator" id="phaseIndicator"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区域 -->
+        <main class="main-content">
+            <!-- 加入游戏面板 -->
+            <section id="joinPanel" class="panel join-panel">
+                <div class="panel-header">
+                    <h2>加入游戏</h2>
+                </div>
+                <div class="panel-body">
+                    <div class="setup-section">
+                        <h3>输入游戏代码</h3>
+                        <input type="text" id="gameCodeInput" class="game-code-input" placeholder="输入游戏代码" maxlength="20">
+                        <button class="btn btn-primary" id="findGameBtn" style="width: 100%;">
+                            <span>🔍</span> 查找游戏
+                        </button>
+                    </div>
+                    
+                    <div id="playerSelectSection" style="display: none;">
+                        <h3>选择你的座位</h3>
+                        <div class="player-select-grid" id="playerSelectGrid">
+                            <!-- 玩家座位将由JavaScript生成 -->
+                        </div>
+                        <button class="btn btn-primary" id="joinGameBtn" style="width: 100%;" disabled>
+                            <span>✓</span> 加入游戏
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 游戏面板 -->
+            <section id="gamePanel" class="panel game-panel" style="display: none;">
+                <div class="game-layout" style="display: block;">
+                    <!-- 角色信息 -->
+                    <div id="roleSection">
+                        <div class="role-card-large" id="roleCard">
+                            <img class="role-icon-img" id="roleIconImg" src="" style="display: none;" alt="角色图标">
+                            <div class="role-icon" id="roleIcon">❓</div>
+                            <div class="role-name" id="roleName">未知角色</div>
+                            <div class="role-type" id="roleType">未知</div>
+                            <div class="role-ability" id="roleAbility">等待说书人分配角色...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 游戏状态 -->
+                    <div class="game-status-panel">
+                        <div class="status-header">
+                            <h3>游戏状态</h3>
+                            <span class="phase-badge day" id="phaseBadge">☀️ 白天</span>
+                        </div>
+                        <div id="dayNightInfo">
+                            <p>第 <span id="dayNumber">1</span> 天</p>
+                            <p>存活玩家: <span id="aliveCount">0</span> 人</p>
+                        </div>
+                    </div>
+                    
+                    <!-- 玩家圆桌视图 -->
+                    <div class="control-card">
+                        <h3>玩家座位</h3>
+                        <div class="player-view-circle" id="playerViewCircle">
+                            <!-- 玩家座位将由JavaScript生成 -->
+                        </div>
+                    </div>
+                    
+                    <!-- 投票面板 -->
+                    <div class="voting-panel" id="votingPanel" style="display: none;">
+                        <h3>投票</h3>
+                        <p id="voteQuestion">是否处决 <strong id="voteTarget"></strong>？</p>
+                        <div class="vote-buttons">
+                            <button class="vote-btn yes" id="voteYesBtn">👍 赞成</button>
+                            <button class="vote-btn no" id="voteNoBtn">👎 反对</button>
+                        </div>
+                        <p id="voteStatus" style="margin-top: 1rem; color: var(--text-muted);"></p>
+                    </div>
+                    
+                    <!-- 夜间等待 -->
+                    <div class="night-waiting" id="nightWaiting" style="display: none;">
+                        <div class="moon-icon">🌙</div>
+                        <h3>夜幕降临</h3>
+                        <p id="nightWaitingText">请闭上眼睛，等待说书人的指示...</p>
+                    </div>
+                    
+                    <!-- 夜间行动面板 -->
+                    <div class="night-action-player-panel" id="nightActionPanel" style="display: none;">
+                        <h3 id="nightActionTitle">你的回合</h3>
+                        <div id="nightActionContent">
+                            <!-- 夜间行动内容 -->
+                        </div>
+                    </div>
+                    
+                    <!-- 公开日志 -->
+                    <div class="control-card">
+                        <h3>公开信息</h3>
+                        <div class="public-log" id="publicLog">
+                            <div class="public-log-entry phase">游戏尚未开始...</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <!-- 语音控制按钮 -->
+    <div id="voiceControls" style="position: fixed; bottom: 1rem; left: 1rem; display: flex; gap: 0.5rem; z-index: 100;">
+        <button id="voiceBtn" onclick="toggleVoiceListening()" 
+                style="width: 48px; height: 48px; border-radius: 50%; border: 2px solid var(--color-blood); background: rgba(0,0,0,0.7); color: var(--color-gold); font-size: 1.3rem; cursor: pointer; transition: all 0.3s ease;"
+                title="语音指令">
+            🎤
+        </button>
+    </div>
+    <script>
+        let isListening = false;
+        function toggleVoiceListening() {
+            const btn = document.getElementById('voiceBtn');
+            if (isListening) {
+                stopListening();
+                btn.style.borderColor = 'var(--color-blood)';
+                btn.style.background = 'rgba(0,0,0,0.7)';
+                isListening = false;
+            } else {
+                startListening();
+                btn.style.borderColor = '#27ae60';
+                btn.style.background = 'rgba(39,174,96,0.3)';
+                isListening = true;
+                setTimeout(() => {
+                    btn.style.borderColor = 'var(--color-blood)';
+                    btn.style.background = 'rgba(0,0,0,0.7)';
+                    isListening = false;
+                }, 5000);
+            }
+        }
+    </script>
+
+    <!-- 连接状态 -->
+    <div class="connection-status connected" id="connectionStatus">
+        <span class="connection-dot"></span>
+        <span id="connectionText">已连接</span>
+    </div>
+
+    <!-- 信息弹窗 -->
+    <div class="modal" id="infoModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="infoModalTitle">信息</h3>
+                <button class="modal-close" onclick="closeModal('infoModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="infoModalBody">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeModal('infoModal')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/player.js') }}"></script>
+</body>
+</html>
